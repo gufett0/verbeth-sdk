@@ -20,8 +20,8 @@ This means every message is:
 - Costly to publish (so spam is disincentivized)
 - Cryptographically anchored to the chain
 
-> You don’t need signatures or AEAD tags to prove a message is real —  
-> the chain is your signature and mailbox.
+> We rely on AEAD provided by nacl.box (XSalsa20 + Poly1305),
+> but avoid additional detached signatures or layered MACs.
 
 ---
 
@@ -71,7 +71,7 @@ function isReplay(log) {
 We intentionally avoid:
 
 - ❌ Signature overhead (ECDSA over ciphertext)
-- ❌ Additional cryptographic layers (AEAD, MACs)
+- ❌ Additional cryptographic layers (MACs)
 - ❌ On-chain nonce state (`mapping` of used nonces)
 
 These would increase gas or complexity **without improving real security** in an Ethereum-native context.

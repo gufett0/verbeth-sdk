@@ -8,8 +8,21 @@ export interface LogMessage {
   nonce: bigint
 }
 
-export function decryptLog(log: LogMessage, recipientSecretKey: Uint8Array): string | null {
-  return decryptMessage(log.ciphertext, recipientSecretKey);
+/**
+ * Decrypts a log message using the recipient's secret key, and optionally verifies
+ * the detached signature using the sender's static signing public key.
+ *
+ * @param log - The log message object from the event
+ * @param recipientSecretKey - The recipient's secret NaCl key (32 bytes)
+ * @param senderStaticSigningPublicKey - Optional: static Ed25519 public key of the sender (32 bytes)
+ * @returns The decrypted message string or null if decryption or verification fails
+ */
+export function decryptLog(
+  log: LogMessage,
+  recipientSecretKey: Uint8Array,
+  senderStaticSigningPublicKey?: Uint8Array
+): string | null {
+  return decryptMessage(log.ciphertext, recipientSecretKey, senderStaticSigningPublicKey);
 }
 
 const seen = new Set<string>();
@@ -20,4 +33,3 @@ export function isDuplicate(log: LogMessage): boolean {
   seen.add(key);
   return false;
 }
-

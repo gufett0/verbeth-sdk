@@ -21,6 +21,7 @@ describe('Log decoding', () => {
       ciphertext,
       timestamp: Math.floor(Date.now() / 1000),
       topic: '0xdeadbeef...', // arbitrary
+      nonce: 1n
     };
 
     const decrypted = decryptLog(mockLog, recipientKey.secretKey);

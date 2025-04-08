@@ -9,6 +9,7 @@ type FixedHardhatEthers = typeof hardhatEthers & {
     name: string,
     signerOrOptions?: Signer | undefined
   ) => Promise<ContractFactory>;
+  
 };
 
 export const ethers = hardhatEthers as FixedHardhatEthers;

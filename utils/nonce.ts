@@ -1,10 +1,7 @@
-import { LogChain } from '../typechain-types';
+const nonceRegistry: Record<string, bigint> = {};
 
-export async function getNextNonce(
-  contract: LogChain,
-  sender: string,
-  topic: string
-): Promise<bigint> {
-  const last = await contract.lastNonce(sender, topic);
-  return last + 1n;
+export function getNextNonce(sender: string, topic: string): bigint {
+  const key = `${sender}-${topic}`;
+  nonceRegistry[key] = (nonceRegistry[key] ?? 0n) + 1n;
+  return nonceRegistry[key];
 }

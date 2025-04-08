@@ -10,13 +10,7 @@ contract LogChain {
         uint256 nonce
     );
 
-    mapping(address => mapping(bytes32 => uint256)) public lastNonce;
-
     function sendMessage(bytes calldata ciphertext, bytes32 topic, uint256 timestamp, uint256 nonce) external {
-
-        require(nonce > lastNonce[msg.sender][topic], "Replay or stale nonce");
-        lastNonce[msg.sender][topic] = nonce;
-
         emit MessageSent(msg.sender, ciphertext, timestamp, topic, nonce);
     }
 }

@@ -11,9 +11,9 @@ export async function sendEncryptedMessage({
   contract: LogChain;
   senderAddress: string;
   topic: string;
-  ciphertext: string; // JSON string
+  ciphertext: string;
   timestamp: number;
 }) {
-  const nonce = await getNextNonce(contract, senderAddress, topic);
+  const nonce = getNextNonce(senderAddress, topic);
   return contract.sendMessage(ciphertext, topic, timestamp, nonce);
 }

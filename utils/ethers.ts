@@ -1,8 +1,9 @@
 import { ethers as hardhatEthers } from 'hardhat';
-import type { Signer } from 'ethers';
+import type { Signer, providers } from 'ethers';
 import type { ContractFactory } from 'ethers';
 
 type FixedHardhatEthers = typeof hardhatEthers & {
+  provider: providers.JsonRpcProvider;
   getSigners: () => Promise<Signer[]>;
   getContractFactory: (
     name: string,

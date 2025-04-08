@@ -9,5 +9,7 @@ End-to-end encrypted messaging over Ethereum logs.
 
 ## Usage (WIP)
 ```ts
-import { encryptMessage, decryptLog } from '@verbeth/sdk'
+import { decryptLog } from '@verbeth/sdk'
+
+const msg = decryptLog(eventLog, mySecretKey);
 ```

@@ -37,3 +37,27 @@ export async function sendEncryptedMessage({
 
   return contract.sendMessage(ciphertext, topic, timestamp, nonce);
 }
+
+
+export async function initiateHandshake({
+  contract,
+  recipientAddress,
+  ephemeralPubKey,
+  plaintextPayload
+}: {
+  contract: LogChain;
+  recipientAddress: string;
+  ephemeralPubKey: Uint8Array;
+  plaintextPayload: string;
+}) {
+  const recipientHash = ethers.utils.keccak256(
+    ethers.utils.toUtf8Bytes('contact:' + recipientAddress.toLowerCase())
+  );
+
+  await contract.initiateHandshake(
+    recipientHash,
+    '0x', // identityPubKey is empty for EOA
+    ethers.utils.hexlify(ephemeralPubKey),
+    ethers.utils.toUtf8Bytes(plaintextPayload)
+  );
+}

@@ -33,3 +33,19 @@ export function isDuplicate(log: LogMessage): boolean {
   seen.add(key);
   return false;
 }
+
+
+
+export interface HandshakeLog {
+  recipientHash: string;
+  sender: string;
+  identityPubKey: string;
+  ephemeralPubKey: string;
+  plaintextPayload: string;
+}
+
+export interface HandshakeResponseLog {
+  inResponseTo: string;
+  responder: string;
+  ciphertext: string;
+}

@@ -1,6 +1,6 @@
 import { expect } from 'chai';
 import nacl from 'tweetnacl';
-import { decryptLog, LogMessage } from '../src/logs';
+import { decryptLog, LogMessage, HandshakeLog, HandshakeResponseLog } from '../src/logs';
 import { encryptMessage } from '../src/crypto';
 
 describe('Log decoding', () => {
@@ -31,5 +31,31 @@ describe('Log decoding', () => {
 
     const decrypted = decryptLog(mockLog, recipientKey.secretKey, senderSignKey.publicKey);
     expect(decrypted).to.equal(message);
+  });
+});
+
+
+describe('HandshakeLog structure', () => {
+  it('should decode a HandshakeLog from event fields', () => {
+    const example: HandshakeLog = {
+      recipientHash: '0x' + 'a'.repeat(64),
+      sender: '0x' + 'b'.repeat(40),
+      identityPubKey: '0x',
+      ephemeralPubKey: '0x' + 'c'.repeat(64),
+      plaintextPayload: 'hi there'
+    };
+
+    expect(example.recipientHash).to.match(/^0x[a-f0-9]{64}$/);
+    expect(example.ephemeralPubKey).to.have.length.greaterThan(10);
+  });
+
+  it('should decode a HandshakeResponseLog', () => {
+    const response: HandshakeResponseLog = {
+      inResponseTo: '0x' + 'd'.repeat(64),
+      responder: '0x' + 'b'.repeat(40),
+      ciphertext: '0x' + 'e'.repeat(64)
+    };
+
+    expect(response.ciphertext).to.match(/^0x[a-f0-9]{64}$/);
   });
 });

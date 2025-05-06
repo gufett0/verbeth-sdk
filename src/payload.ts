@@ -34,3 +34,28 @@ export function decodePayload(json: string): {
   };
 }
 
+
+
+
+export interface HandshakePayload {
+  identityPubKey: Uint8Array;
+  ephemeralPubKey: Uint8Array;
+  plaintextPayload: string;
+}
+
+export function encodeHandshakePayload(payload: HandshakePayload): string {
+  return JSON.stringify({
+    identityPubKey: Buffer.from(payload.identityPubKey).toString('base64'),
+    ephemeralPubKey: Buffer.from(payload.ephemeralPubKey).toString('base64'),
+    plaintextPayload: payload.plaintextPayload
+  });
+}
+
+export function decodeHandshakePayload(encoded: string): HandshakePayload {
+  const obj = JSON.parse(encoded);
+  return {
+    identityPubKey: Uint8Array.from(Buffer.from(obj.identityPubKey, 'base64')),
+    ephemeralPubKey: Uint8Array.from(Buffer.from(obj.ephemeralPubKey, 'base64')),
+    plaintextPayload: obj.plaintextPayload
+  };
+}

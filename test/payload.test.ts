@@ -1,6 +1,7 @@
 import { expect } from 'chai';
 import nacl from 'tweetnacl';
 import { encryptMessage, decryptMessage } from '../src/crypto';
+import { HandshakePayload, encodeHandshakePayload, decodeHandshakePayload } from '../src/payload';
 
 describe('Crypto Payload Encoding', () => {
   it('should encrypt and decrypt a message successfully', () => {
@@ -63,5 +64,23 @@ describe('Crypto Payload Encoding', () => {
 
     const decrypted = decryptMessage(tampered, recipientKey.secretKey, senderSignKey.publicKey);
     expect(decrypted).to.be.null;
+  });
+});
+
+
+describe('HandshakePayload', () => {
+  it('should encode and decode a handshake payload correctly', () => {
+    const payload: HandshakePayload = {
+      identityPubKey: new Uint8Array(32).fill(1),
+      ephemeralPubKey: new Uint8Array(32).fill(2),
+      plaintextPayload: 'hello bob'
+    };
+
+    const encoded = encodeHandshakePayload(payload);
+    const decoded = decodeHandshakePayload(encoded);
+
+    expect(decoded.identityPubKey).to.deep.equal(payload.identityPubKey);
+    expect(decoded.ephemeralPubKey).to.deep.equal(payload.ephemeralPubKey);
+    expect(decoded.plaintextPayload).to.equal('hello bob');
   });
 });

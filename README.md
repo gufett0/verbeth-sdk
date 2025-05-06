@@ -1,35 +1,47 @@
 # VerbEth SDK
 
-End-to-end encrypted messaging over Ethereum logs, using the blockchain as the only transport layer. Uses tweetnacl.box to encrypt/decrypt messages with ephemeral keys and optional sender signatures. Ensures forward secrecy (ephemeral key) and authenticity (optional signature with sender's long-term key).
+End-to-end encrypted messaging over Ethereum logs, using the blockchain as the only transport layer. Uses `tweetnacl.box` to encrypt/decrypt messages with ephemeral keys and optional sender identity. Ensures forward secrecy and compatibility with smart accounts.
 
-## How It Works: Alice & Bob
+## How It Works: Alice & Bob (Handshake Flow)
 
-👩‍💻 Alice wants to send Bob 👨‍💻 a private message over Ethereum logs — without knowing Bob personally.
+👩‍💻 Alice wants to initiate a secure chat with Bob 👨‍💻 using only the blockchain.
 
-1. Alice opens her dapp that uses VerbEth SDK
-2. The SDK asks Bob (via ethers.Signer) to sign a fallback message — from that, it derives Bob's x25519 pubkey
-3. Alice's browser generates a new ephemeral keypair
-4. Alice encrypts her message using NaCl and adds a detached signature with her long-term signing key
-5. The encrypted payload is JSON-wrapped and sent to the blockchain as a MessageSent event
-6. Bob watches logs using filters (topic, sender)
-7. When Bob sees a message:
-   - He extracts the ciphertext
-   - Verifies Alice's signature (optional)
-   - Decrypts the message using his x25519 secret key
-
+1. Alice generates a new **ephemeral keypair**.
+2. She emits a `Handshake` event:
+   - Includes her ephemeral public key
+   - Optionally includes her long-term identity key (if not an EOA)
+   - Plaintext payload like: `"Hi Bob, respond if you're online"`
+3. Bob watches logs for `Handshake` events addressed to him:
+   - Looks for `keccak256("contact:0xMyAddress")` in `recipientHash`
+   - Verifies if he's the recipient
+4. If interested, Bob responds with a `HandshakeResponse`:
+   - Contains a payload encrypted to Alice's ephemeral key
+   - Includes his own ephemeral key (and optional identity key in future)
+5. Once handshake is complete, both use their shared secret to exchange `MessageSent` logs:
+   - Encrypted payloads using `NaCl.box` and fresh ephemeral keys
+   - Bob and Alice filter messages using topics, timestamp, or sender
 
 ## Features
 
-- Stateless encrypted messaging
+- Stateless encrypted messaging via logs
 - Ephemeral keys & forward secrecy
-- Minimal on-chain interface
-- No centralized server or database
-- Private communication via public blockchain
+- Handshake-based key exchange (no prior trust)
+- Minimal metadata via `recipientHash`
+- Fully on-chain: no servers, no relays
+- Compatible with EOAs and smart contract accounts
 
 ## Usage (WIP)
 
 ```ts
-import { decryptLog } from '@verbeth/sdk'
+import { decryptLog, initiateHandshake } from '@verbeth/sdk'
 
+// Receive and decrypt a message
 const msg = decryptLog(eventLog, mySecretKey);
-```
+
+// Start a handshake
+await initiateHandshake({
+  contract,
+  recipientAddress: '0xBob...',
+  ephemeralPubKey: myEphemeral.publicKey,
+  plaintextPayload: 'Hi Bob, ping from Alice'
+});

@@ -34,13 +34,13 @@ export function decodePayload(json: string): {
   };
 }
 
-
-
-
 export interface HandshakePayload {
   identityPubKey: Uint8Array;
   ephemeralPubKey: Uint8Array;
   plaintextPayload: string;
+}
+
+export interface HandshakeResponsePayload extends EncryptedPayload {
 }
 
 export function encodeHandshakePayload(payload: HandshakePayload): string {
@@ -57,5 +57,29 @@ export function decodeHandshakePayload(encoded: string): HandshakePayload {
     identityPubKey: Uint8Array.from(Buffer.from(obj.identityPubKey, 'base64')),
     ephemeralPubKey: Uint8Array.from(Buffer.from(obj.ephemeralPubKey, 'base64')),
     plaintextPayload: obj.plaintextPayload
+  };
+}
+
+
+export interface HandshakeResponseContent {
+  identityPubKey: Uint8Array; 
+  ephemeralPubKey: Uint8Array;
+  note?: string;
+}
+
+export function encodeHandshakeResponseContent(content: HandshakeResponseContent): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify({
+    identityPubKey: Buffer.from(content.identityPubKey).toString('base64'),
+    ephemeralPubKey: Buffer.from(content.ephemeralPubKey).toString('base64'),
+    note: content.note
+  }));
+}
+
+export function decodeHandshakeResponseContent(encoded: Uint8Array): HandshakeResponseContent {
+  const obj = JSON.parse(new TextDecoder().decode(encoded));
+  return {
+    identityPubKey: Uint8Array.from(Buffer.from(obj.identityPubKey, 'base64')),
+    ephemeralPubKey: Uint8Array.from(Buffer.from(obj.ephemeralPubKey, 'base64')),
+    note: obj.note ?? undefined
   };
 }

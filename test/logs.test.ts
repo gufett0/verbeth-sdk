@@ -40,12 +40,13 @@ describe('HandshakeLog structure', () => {
     const example: HandshakeLog = {
       recipientHash: '0x' + 'a'.repeat(64),
       sender: '0x' + 'b'.repeat(40),
-      identityPubKey: '0x',
-      ephemeralPubKey: '0x' + 'c'.repeat(64),
+      identityPubKey: '0x' + 'c'.repeat(64),    
+      ephemeralPubKey: '0x' + 'd'.repeat(64),
       plaintextPayload: 'hi there'
     };
 
     expect(example.recipientHash).to.match(/^0x[a-f0-9]{64}$/);
+    expect(example.identityPubKey).to.match(/^0x[a-f0-9]{64}$/); 
     expect(example.ephemeralPubKey).to.have.length.greaterThan(10);
   });
 
@@ -59,3 +60,4 @@ describe('HandshakeLog structure', () => {
     expect(response.ciphertext).to.match(/^0x[a-f0-9]{64}$/);
   });
 });
+

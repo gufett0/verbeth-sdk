@@ -13,7 +13,7 @@ contract LogChain {
     event Handshake(
         bytes32 indexed recipientHash,      // keccak256("contact:<0xRecipient>")
         address indexed sender,             // msg.sender (EOA or smart account)
-        bytes identityPubKey,               // public key that controls sender (or empty if EOA & known)
+        bytes identityPubKey,               // public key that controls sender
         bytes ephemeralPubKey,              // per-message key
         bytes plaintextPayload              // optional greeting or instructions
     );
@@ -39,7 +39,7 @@ contract LogChain {
 
     function initiateHandshake(
         bytes32 recipientHash,              // keccak256("contact:" + lowercaseAddress)
-        bytes calldata identityPubKey,      // empty for EOAs
+        bytes calldata identityPubKey,      // public key that controls sender
         bytes calldata ephemeralPubKey,     // generated per handshake
         bytes calldata plaintextPayload     // optional human-readable or fallback message
     ) external {

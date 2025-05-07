@@ -20,7 +20,7 @@ contract LogChain {
 
     event HandshakeResponse(
         bytes32 indexed inResponseTo,       // e.g. keccak256 of original handshake or Alice address
-        address indexed responder,          // msg.sender (EOA or smart account)
+        address indexed responder,          
         bytes ciphertext                    // encrypted Bob's pubkey & ephemeral key for Alice
     );
 

@@ -9,7 +9,7 @@ End-to-end encrypted messaging over Ethereum logs, using the blockchain as the o
 1. Alice generates a new **ephemeral keypair**.
 2. She emits a `Handshake` event:
    - Includes her ephemeral public key
-   - Optionally includes her long-term identity key
+   - Includes her long-term X25519 identity key (derived from Ethereum address)
    - Plaintext payload like: `"Hi Bob, respond if you're online"`
 3. Bob watches logs for `Handshake` events addressed to him:
    - Looks for `keccak256("contact:0xMyAddress")` in `recipientHash`
@@ -20,6 +20,13 @@ End-to-end encrypted messaging over Ethereum logs, using the blockchain as the o
 5. Once handshake is complete, both use their shared secret to exchange `MessageSent` logs:
    - Encrypted payloads using `NaCl.box` and fresh ephemeral keys
    - Bob and Alice filter messages using topics, timestamp, or sender
+
+✅ If the sender does not yet know the recipient's long-term public key (X25519), 
+they must emit a `Handshake` event. This allows the recipient to reply with their key.
+
+If the recipient’s public key is already known (from a past `HandshakeResponse`, 
+on-chain announcement, or static mapping), the sender may skip the handshake.
+
 
 ## Features
 

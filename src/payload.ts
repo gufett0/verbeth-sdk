@@ -35,6 +35,35 @@ export interface HandshakeResponseContent {
   identityProof?: IdentityProof;
 }
 
+export interface HandshakeContent {
+  plaintextPayload: string;
+  identityProof?: IdentityProof;
+}
+
+export function parseHandshakePayload(plaintextPayload: string): HandshakeContent {
+  try {
+    // Prova a fare parse come JSON
+    const parsed = JSON.parse(plaintextPayload);
+    if (typeof parsed === 'object' && parsed.plaintextPayload) {
+      return parsed as HandshakeContent;
+    }
+  } catch (e) {
+    // Se fallisce, tratta come string semplice (backward compatibility)
+  }
+  
+  // Fallback per messaggi legacy
+  return { plaintextPayload };
+}
+
+export function serializeHandshakeContent(content: HandshakeContent): string {
+  // Se non ha identityProof, serializza solo il messaggio (comportamento legacy)
+  if (!content.identityProof) {
+    return content.plaintextPayload;
+  }
+  // Altrimenti serializza tutto
+  return JSON.stringify(content);
+}
+
 export function encodePayload(ephemeralPubKey: Uint8Array, nonce: Uint8Array, ciphertext: Uint8Array, sig?: Uint8Array): string {
   const payload: EncryptedPayload = {
     v: 1,

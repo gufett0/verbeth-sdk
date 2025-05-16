@@ -1,11 +1,175 @@
 import { expect } from "chai";
 import { ethers, Wallet, Provider, Signer } from "../utils/ethers"; 
-import { verifyHandshakeResponseIdentity, verifyEOAHandshakeResponse } from "../src/verify";
+import { verifyHandshakeResponseIdentity, verifyHandshakeIdentity } from "../src/verify";
+import { verifyEOAIdentity } from "../src/utils";
 import { convertPublicKeyToX25519 } from "../utils/x25519";
 import { LogChain, TestSmartAccount } from "../typechain-types";
 import { encryptStructuredPayload } from "../src/crypto";
 import { HandshakeResponseContent } from "../src/payload";
 import nacl from 'tweetnacl';
+
+describe("Handshake Identity Verification", function () {
+  let testSmartAccount: TestSmartAccount;
+  let owner: Signer;
+  let provider: Provider;
+
+  beforeEach(async function () {
+    [owner] = (await ethers.getSigners()) as unknown as Signer[];
+    provider = owner.provider!;
+    const AccountFactory = await ethers.getContractFactory("TestSmartAccount");
+    testSmartAccount = await AccountFactory.deploy(await owner.getAddress());
+    await testSmartAccount.waitForDeployment();
+  });
+
+  it("should verify EOA handshake identity with proper tx", async function () {
+    const [fundedSigner] = await ethers.getSigners();
+    const aliceEOA = new Wallet(Wallet.createRandom().privateKey).connect(provider);
+    
+    await fundedSigner.sendTransaction({
+      to: aliceEOA.address,
+      value: ethers.parseEther("1.0"),
+    });
+  
+    const testMessage = "VerbEth-test";
+    const signature = await aliceEOA.signMessage(testMessage);
+    const expandedPubKey = ethers.SigningKey.recoverPublicKey(
+      ethers.hashMessage(testMessage),
+      signature
+    );
+    const rawBytes = ethers.getBytes(expandedPubKey).slice(1);
+    const identityPubKey = convertPublicKeyToX25519(rawBytes);
+  
+    const logChain = await ethers.getContractFactory("LogChain").then(f => f.deploy());
+    const tx = await logChain
+      .connect(aliceEOA)
+      .initiateHandshake(
+        ethers.keccak256(ethers.toUtf8Bytes("test")),
+        ethers.hexlify(identityPubKey),
+        ethers.hexlify(nacl.box.keyPair().publicKey),
+        ethers.toUtf8Bytes("Hi Bob, this is Alice")
+      );
+    
+    const receipt = await tx.wait();
+    const minedTx = await provider.getTransaction(receipt!.hash);
+    const serializedTx = ethers.Transaction.from(minedTx!).serialized;
+    
+    const handshakeEvent = {
+      recipientHash: ethers.keccak256(ethers.toUtf8Bytes("test")),
+      sender: aliceEOA.address,
+      identityPubKey: ethers.hexlify(identityPubKey),
+      ephemeralPubKey: ethers.hexlify(nacl.box.keyPair().publicKey),
+      plaintextPayload: "Hi Bob, this is Alice"
+    };
+  
+    const verified = await verifyHandshakeIdentity(
+      handshakeEvent,
+      serializedTx,
+      provider
+    );
+    
+    expect(verified).to.be.true;
+  });
+
+
+  it("should verify Smart Account handshake identity with proof", async function () {
+    const aliceIdentityPubKey = nacl.box.keyPair().publicKey;
+    const aliceEphemeralPubKey = nacl.box.keyPair().publicKey;
+    const recipientHash = ethers.keccak256(ethers.toUtf8Bytes("test"));
+    
+    const bindingMessage = ethers.solidityPacked(
+      ['bytes32', 'bytes32', 'string'],
+      [aliceIdentityPubKey, recipientHash, 'VerbEth-Handshake-v1']
+    );
+    
+    const messageHash = ethers.hashMessage(bindingMessage);
+    const signature = await owner.signMessage(bindingMessage);
+    
+    const handshakeContent = {
+      plaintextPayload: "Hi Bob, I'm Alice (Smart Account)",
+      identityProof: {
+        signature,
+        message: messageHash
+      }
+    };
+    
+    const handshakeEvent = {
+      recipientHash,
+      sender: await testSmartAccount.getAddress(),
+      identityPubKey: ethers.hexlify(aliceIdentityPubKey),
+      ephemeralPubKey: ethers.hexlify(aliceEphemeralPubKey),
+      plaintextPayload: JSON.stringify(handshakeContent)
+    };
+    
+    const verified = await verifyHandshakeIdentity(
+      handshakeEvent,
+      undefined,
+      provider
+    );
+    
+    expect(verified).to.be.true;
+  });
+
+  it("should reject Smart Account handshake with invalid identity proof", async function () {
+    const [, attacker] = await ethers.getSigners();
+    const aliceIdentityPubKey = nacl.box.keyPair().publicKey;
+    const aliceEphemeralPubKey = nacl.box.keyPair().publicKey;
+    const recipientHash = ethers.keccak256(ethers.toUtf8Bytes("test"));
+    
+    const bindingMessage = ethers.solidityPacked(
+      ['bytes32', 'bytes32', 'string'],
+      [aliceIdentityPubKey, recipientHash, 'VerbEth-Handshake-v1']
+    );
+    
+    const messageHash = ethers.hashMessage(bindingMessage);
+    const invalidSignature = await attacker.signMessage(bindingMessage);
+    
+    const handshakeContent = {
+      plaintextPayload: "Hi Bob, I'm a malicious actor",
+      identityProof: {
+        signature: invalidSignature,
+        message: messageHash
+      }
+    };
+    
+    const handshakeEvent = {
+      recipientHash,
+      sender: await testSmartAccount.getAddress(),
+      identityPubKey: ethers.hexlify(aliceIdentityPubKey),
+      ephemeralPubKey: ethers.hexlify(aliceEphemeralPubKey),
+      plaintextPayload: JSON.stringify(handshakeContent)
+    };
+    
+    const verified = await verifyHandshakeIdentity(
+      handshakeEvent,
+      undefined,
+      provider
+    );
+    
+    expect(verified).to.be.false;
+  });
+
+  it("should reject Smart Account claiming to be EOA", async function () {
+    const aliceIdentityPubKey = nacl.box.keyPair().publicKey;
+    const aliceEphemeralPubKey = nacl.box.keyPair().publicKey;
+    
+    const handshakeEvent = {
+      recipientHash: ethers.keccak256(ethers.toUtf8Bytes("test")),
+      sender: await testSmartAccount.getAddress(), 
+      identityPubKey: ethers.hexlify(aliceIdentityPubKey),
+      ephemeralPubKey: ethers.hexlify(aliceEphemeralPubKey),
+      plaintextPayload: "Hi Bob, I'm totally an EOA"
+    };
+    
+
+    const verified = await verifyHandshakeIdentity(
+      handshakeEvent,
+      undefined,
+      provider
+    );
+    
+    expect(verified).to.be.false;
+  });
+});
 
 describe("Handshake Response Verification", function () {
   let provider: Provider;
@@ -56,8 +220,7 @@ describe("Handshake Response Verification", function () {
       const minedTx = await provider.getTransaction(receipt!.hash);
       const serializedTx = ethers.Transaction.from(minedTx!).serialized;
       
-      // Test verification
-      const verified = verifyEOAHandshakeResponse(serializedTx, x25519PubKey);
+      const verified = verifyEOAIdentity(serializedTx, x25519PubKey);
       expect(verified).to.be.true;
     });
 
@@ -76,7 +239,7 @@ describe("Handshake Response Verification", function () {
       const minedTx = await provider.getTransaction(receipt!.hash);
       const serializedTx = ethers.Transaction.from(minedTx!).serialized;
       
-      const verified = verifyEOAHandshakeResponse(serializedTx, wrongKey);
+      const verified = verifyEOAIdentity(serializedTx, wrongKey);
       expect(verified).to.be.false;
     });
   });
@@ -159,8 +322,9 @@ describe("Handshake Response Verification", function () {
       const minedTx = await provider.getTransaction(receipt!.hash);
       const serializedTx = ethers.Transaction.from(minedTx!).serialized;
       
-      // Mock response event
+      // Mock response event with proper HandshakeResponseLog structure
       const responseEvent = {
+        inResponseTo: ethers.keccak256(ethers.toUtf8Bytes("test")),
         responder: eoaWallet.address,
         ciphertext: ethers.hexlify(ethers.randomBytes(64))
       };
@@ -193,7 +357,6 @@ describe("Handshake Response Verification", function () {
       const messageHash = ethers.hashMessage(bindingMessage);
       const signature = await owner.signMessage(bindingMessage);
       
-      // Create response content
       const responseContent: HandshakeResponseContent = {
         identityPubKey: bobIdentityPubKey,
         ephemeralPubKey: bobEphemeral.publicKey,
@@ -204,7 +367,6 @@ describe("Handshake Response Verification", function () {
         }
       };
       
-      // Encrypt response
       const encryptedPayload = encryptStructuredPayload(
         responseContent,
         aliceEphemeral.publicKey,
@@ -212,15 +374,16 @@ describe("Handshake Response Verification", function () {
         bobEphemeral.publicKey
       );
       
-      // Mock response event from smart account
+      // Mock response event from smart account with proper structure
       const responseEvent = {
+        inResponseTo,
         responder: await testSmartAccount.getAddress(),
         ciphertext: ethers.hexlify(ethers.toUtf8Bytes(encryptedPayload))
       };
       
       // Test unified verification - should detect smart account and verify via EIP-1271
       const verified = await verifyHandshakeResponseIdentity(
-        "", // Empty txHex since we're testing smart account path
+        "", 
         responseEvent,
         bobIdentityPubKey,
         aliceEphemeral.secretKey,
@@ -265,6 +428,7 @@ describe("Handshake Response Verification", function () {
       );
       
       const responseEvent = {
+        inResponseTo,
         responder: await testSmartAccount.getAddress(),
         ciphertext: ethers.hexlify(ethers.toUtf8Bytes(encryptedPayload))
       };
@@ -301,7 +465,9 @@ describe("Handshake Response Verification", function () {
         bobEphemeral.publicKey
       );
       
+      const inResponseTo = ethers.keccak256(ethers.toUtf8Bytes("test-handshake"));
       const responseEvent = {
+        inResponseTo,
         responder: await testSmartAccount.getAddress(),
         ciphertext: ethers.hexlify(ethers.toUtf8Bytes(encryptedPayload))
       };

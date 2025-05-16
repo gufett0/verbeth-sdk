@@ -3,7 +3,7 @@ import { getNextNonce } from '../utils/nonce';
 import { encryptMessage, encryptStructuredPayload } from './crypto';
 import { ethers, Signer } from '../utils/ethers';
 import nacl from 'tweetnacl';
-import { HandshakeResponseContent } from './payload';
+import { HandshakeResponseContent, HandshakeContent, serializeHandshakeContent } from './payload';
 
 /**
  * Sends an encrypted message assuming recipient's pubkey was already obtained via handshake
@@ -49,23 +49,47 @@ export async function initiateHandshake({
   recipientAddress,
   identityPubKey,
   ephemeralPubKey,
-  plaintextPayload
+  plaintextPayload,
+  includeIdentityProof = false,
+  signer
 }: {
   contract: LogChain;
   recipientAddress: string;
   identityPubKey: Uint8Array;         // x25519 pubkey
   ephemeralPubKey: Uint8Array;        // Ephemeral pubkey used for this handshake
   plaintextPayload: string;           // plaintext message (e.g., "hello")
+  includeIdentityProof?: boolean;  // Nuovo optional
+  signer?: Signer;                // Nuovo optional
 }) {
   const recipientHash = ethers.keccak256(
     ethers.toUtf8Bytes('contact:' + recipientAddress.toLowerCase())
   );
 
+  const handshakeContent: HandshakeContent = {
+    plaintextPayload
+  };
+
+  if (includeIdentityProof && signer) {
+    const bindingMessage = ethers.solidityPacked( 
+      ['bytes32', 'bytes32', 'string'],
+      [identityPubKey, recipientHash, 'VerbEth-Handshake-v1']
+    );
+    
+    const signature = await signer.signMessage(bindingMessage);
+    handshakeContent.identityProof = {
+      signature,
+      message: ethers.keccak256(bindingMessage)
+    };
+  }
+
+  const serializedPayload = serializeHandshakeContent(handshakeContent);
+
+
   await contract.initiateHandshake(
     recipientHash,
     ethers.hexlify(identityPubKey), 
     ethers.hexlify(ephemeralPubKey),
-    ethers.toUtf8Bytes(plaintextPayload)
+    ethers.toUtf8Bytes(serializedPayload)
   );
 }
 

@@ -4,7 +4,35 @@ export interface EncryptedPayload {
   n: string;   // base64 of nonce
   ct: string;  // base64 of ciphertext
   sig?: string; // base64 of detached signature over (epk || n || ct)
+}
 
+export interface IdentityProof {
+  signature: string;  // The signature proving identity key ownership
+  message: string;    // The keccak256 hash of the signed message
+}
+
+// Unified message payload - now structured like HandshakeResponse
+export interface MessagePayload {
+  content: string;
+  timestamp?: number;
+  messageType?: 'text' | 'file' | 'media';
+  metadata?: Record<string, any>;
+}
+
+export interface HandshakePayload {
+  identityPubKey: Uint8Array;
+  ephemeralPubKey: Uint8Array;
+  plaintextPayload: string;
+}
+
+export interface HandshakeResponsePayload extends EncryptedPayload {
+}
+
+export interface HandshakeResponseContent {
+  identityPubKey: Uint8Array; 
+  ephemeralPubKey: Uint8Array;
+  note?: string;
+  identityProof?: IdentityProof;
 }
 
 export function encodePayload(ephemeralPubKey: Uint8Array, nonce: Uint8Array, ciphertext: Uint8Array, sig?: Uint8Array): string {
@@ -17,7 +45,6 @@ export function encodePayload(ephemeralPubKey: Uint8Array, nonce: Uint8Array, ci
   };
   return JSON.stringify(payload);
 }
-
 
 export function decodePayload(json: string): {
   epk: Uint8Array,
@@ -32,15 +59,6 @@ export function decodePayload(json: string): {
     ciphertext: Buffer.from(ct, 'base64'),
     ...(sig && { sig: Buffer.from(sig, 'base64') })
   };
-}
-
-export interface HandshakePayload {
-  identityPubKey: Uint8Array;
-  ephemeralPubKey: Uint8Array;
-  plaintextPayload: string;
-}
-
-export interface HandshakeResponsePayload extends EncryptedPayload {
 }
 
 export function encodeHandshakePayload(payload: HandshakePayload): string {
@@ -60,26 +78,45 @@ export function decodeHandshakePayload(encoded: string): HandshakePayload {
   };
 }
 
+// Unified function for encoding any structured content as Uint8Array
+export function encodeStructuredContent<T>(content: T): Uint8Array {
+  // Convert Uint8Arrays to base64 strings for JSON serialization
+  const serialized = JSON.stringify(content, (key, value) => {
+    if (value instanceof Uint8Array) {
+      return Buffer.from(value).toString('base64');
+    }
+    return value;
+  });
+  return new TextEncoder().encode(serialized);
+}
 
-export interface HandshakeResponseContent {
-  identityPubKey: Uint8Array; 
-  ephemeralPubKey: Uint8Array;
-  note?: string;
+// Unified function for decoding structured content
+export function decodeStructuredContent<T>(
+  encoded: Uint8Array,
+  converter: (obj: any) => T
+): T {
+  const decoded = JSON.parse(new TextDecoder().decode(encoded));
+  return converter(decoded);
+}
+
+// Specific encoders/decoders
+export function encodeMessagePayload(payload: MessagePayload): Uint8Array {
+  return encodeStructuredContent(payload);
+}
+
+export function decodeMessagePayload(encoded: Uint8Array): MessagePayload {
+  return decodeStructuredContent(encoded, (obj) => obj);
 }
 
 export function encodeHandshakeResponseContent(content: HandshakeResponseContent): Uint8Array {
-  return new TextEncoder().encode(JSON.stringify({
-    identityPubKey: Buffer.from(content.identityPubKey).toString('base64'),
-    ephemeralPubKey: Buffer.from(content.ephemeralPubKey).toString('base64'),
-    note: content.note
-  }));
+  return encodeStructuredContent(content);
 }
 
 export function decodeHandshakeResponseContent(encoded: Uint8Array): HandshakeResponseContent {
-  const obj = JSON.parse(new TextDecoder().decode(encoded));
-  return {
+  return decodeStructuredContent(encoded, (obj) => ({
     identityPubKey: Uint8Array.from(Buffer.from(obj.identityPubKey, 'base64')),
     ephemeralPubKey: Uint8Array.from(Buffer.from(obj.ephemeralPubKey, 'base64')),
-    note: obj.note ?? undefined
-  };
+    note: obj.note,
+    identityProof: obj.identityProof
+  }));
 }

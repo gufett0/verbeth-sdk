@@ -1,10 +1,9 @@
 import { LogChain } from '../typechain-types';
 import { getNextNonce } from '../utils/nonce';
-import { encryptMessage } from './crypto';
-import { ethers } from 'ethers';
+import { encryptMessage, encryptStructuredPayload } from './crypto';
+import { ethers, Signer } from '../utils/ethers';
 import nacl from 'tweetnacl';
-import { encodePayload, encodeHandshakeResponseContent } from './payload';
-
+import { HandshakeResponseContent } from './payload';
 
 /**
  * Sends an encrypted message assuming recipient's pubkey was already obtained via handshake
@@ -70,7 +69,6 @@ export async function initiateHandshake({
   );
 }
 
-
 /**
  * Responds to a handshake by encrypting the responder's keys for the initiator
  */
@@ -80,41 +78,49 @@ export async function respondToHandshake({
   initiatorPubKey,
   responderIdentityPubKey,
   responderEphemeralKeyPair,
-  note
+  note,
+  signer,
+  includeIdentityProof = false
 }: {
   contract: LogChain;
-  inResponseTo: string;          // keccak256 hash of the original handshake or sender address
-  initiatorPubKey: Uint8Array;   // ephemeral public key from the initiator
-  responderIdentityPubKey: Uint8Array; // x25519 public key of the responder
+  inResponseTo: string;
+  initiatorPubKey: Uint8Array;
+  responderIdentityPubKey: Uint8Array;
   responderEphemeralKeyPair?: nacl.BoxKeyPair;
-  note?: string;                
+  note?: string;
+  signer?: Signer; 
+  includeIdentityProof?: boolean;
 }) {
-  // Generate an ephemeral key pair if one wasn't provided
   const ephemeralKeyPair = responderEphemeralKeyPair || nacl.box.keyPair();
-  const responseContent = {
+  
+  let identityProof;
+  if (includeIdentityProof && signer) {
+    const bindingMessage = ethers.solidityPacked(
+      ['bytes32', 'bytes32', 'string'],
+      [responderIdentityPubKey, inResponseTo, 'VerbEth-HSResponse-v1']
+    );
+    
+    const signature = await signer.signMessage(bindingMessage);
+    identityProof = {
+      signature,
+      message: ethers.keccak256(bindingMessage)
+    };
+  }
+  
+  const responseContent: HandshakeResponseContent = {
     identityPubKey: responderIdentityPubKey,
     ephemeralPubKey: ephemeralKeyPair.publicKey,
-    note
+    note,
+    identityProof
   };
   
-  const plaintext = encodeHandshakeResponseContent(responseContent);
-  const nonce = nacl.randomBytes(nacl.box.nonceLength);
-  
-  // Encrypt the content using the initiator's public key
-  const ciphertext = nacl.box(
-    plaintext,
-    nonce,
+  // Use the unified encryption for structured payloads
+  const payload = encryptStructuredPayload(
+    responseContent,
     initiatorPubKey,
-    ephemeralKeyPair.secretKey
+    ephemeralKeyPair.secretKey,
+    ephemeralKeyPair.publicKey
   );
   
-  // Format the response payload
-  const payload = encodePayload(
-    ephemeralKeyPair.publicKey,
-    nonce,
-    ciphertext
-  );
-  
-  // Send the response
   return contract.respondToHandshake(inResponseTo, ethers.toUtf8Bytes(payload));
 }

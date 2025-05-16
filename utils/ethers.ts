@@ -9,6 +9,9 @@ import {
   randomBytes as ethersRandomBytes,
   Transaction,
   getBytes,
+  Provider,
+  Signer,
+  solidityPacked
 } from 'ethers';
 
 // Create a wrapper that combines functionality
@@ -26,11 +29,12 @@ const ethers = {
   toUtf8Bytes: (text: string) => ethersToUtf8Bytes(text),
   hexlify: (value: any) => ethersHexlify(value),
   randomBytes: (length: number) => ethersRandomBytes(length),
-  verifyMessage: hardhatEthers.verifyMessage
+  verifyMessage: hardhatEthers.verifyMessage,
+  solidityPacked: solidityPacked
 };
 
 // The tests are importing Wallet separately, so we need to export it
-export { Wallet, ethers };
+export { Wallet, ethers, Provider, Signer };
 
 export const BigNumber = {
   from: (value: any) => BigInt(value.toString())

@@ -3,10 +3,19 @@ import '@nomicfoundation/hardhat-toolbox';
 import "@nomicfoundation/hardhat-ignition";
 import 'hardhat-gas-reporter';
 import "@typechain/hardhat";
-
+import "hardhat-dependency-compiler";
 
 const config: HardhatUserConfig = {
-  solidity: '0.8.24',
+  solidity: {
+    compilers: [
+      {
+        version: "0.8.24", 
+        settings: {
+          optimizer: { enabled: true, runs: 200 },
+        },
+      },
+    ],
+  },
   gasReporter: {
     enabled: true,
     currency: 'USD',
@@ -20,6 +29,11 @@ const config: HardhatUserConfig = {
     tests: "./test",
     cache: "./cache",
     artifacts: "./artifacts"
+  },
+  dependencyCompiler: {
+    paths: [
+      "test/contracts/TestSmartAccount.sol",
+    ]
   }
 };
 

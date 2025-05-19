@@ -3,7 +3,7 @@ import { ethers, Wallet, Provider, Signer } from "../utils/ethers";
 import { verifyHandshakeResponseIdentity, verifyHandshakeIdentity } from "../src/verify";
 import { verifyEOAIdentity } from "../src/utils";
 import { convertPublicKeyToX25519 } from "../utils/x25519";
-import { LogChain, TestSmartAccount } from "../typechain-types";
+import { LogChainV1, TestSmartAccount } from "../typechain-types";
 import { encryptStructuredPayload } from "../src/crypto";
 import { HandshakeResponseContent } from "../src/payload";
 import nacl from 'tweetnacl';
@@ -39,7 +39,7 @@ describe("Handshake Identity Verification", function () {
     const rawBytes = ethers.getBytes(expandedPubKey).slice(1);
     const identityPubKey = convertPublicKeyToX25519(rawBytes);
   
-    const logChain = await ethers.getContractFactory("LogChain").then(f => f.deploy());
+    const logChain = await ethers.getContractFactory("LogChainV1").then(f => f.deploy());
     const tx = await logChain
       .connect(aliceEOA)
       .initiateHandshake(
@@ -180,10 +180,10 @@ describe("Handshake Response Verification", function () {
   });
 
   describe("EOA Verification", function () {
-    let logChain: LogChain;
+    let logChain: LogChainV1;
 
     beforeEach(async () => {
-      const factory = await ethers.getContractFactory("LogChain");
+      const factory = await ethers.getContractFactory("LogChainV1");
       logChain = await factory.deploy();
       await logChain.waitForDeployment();
     });
@@ -276,13 +276,13 @@ describe("Handshake Response Verification", function () {
   });
 
   describe("Unified verifyHandshakeResponseIdentity", function () {
-    let logChain: LogChain;
+    let logChain: LogChainV1;
     let testSmartAccount: TestSmartAccount;
     let owner: Signer;
 
     beforeEach(async function () {
       [owner] = (await ethers.getSigners()) as unknown as Signer[];
-      const logChainFactory = await ethers.getContractFactory("LogChain");
+      const logChainFactory = await ethers.getContractFactory("LogChainV1");
       logChain = await logChainFactory.deploy();
       await logChain.waitForDeployment();
       

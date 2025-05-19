@@ -1,13 +1,13 @@
 import { expect } from 'chai';
 import { ethers } from '../utils/ethers';
-import { LogChain } from '../typechain-types';
+import { LogChainV1 } from '../typechain-types';
 
 describe('LogChain', () => {
-  let logChain: LogChain;
+  let logChain: LogChainV1;
 
   beforeEach(async () => {
-    const factory = await ethers.getContractFactory('LogChain');
-    logChain = await factory.deploy();
+    const factory = await ethers.getContractFactory('LogChainV1');
+    logChain = (await factory.deploy()) as LogChainV1;
     await logChain.waitForDeployment();
   });
 

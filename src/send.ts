@@ -1,4 +1,4 @@
-import { LogChain } from '../typechain-types';
+import { LogChainV1 } from '../typechain-types';
 import { getNextNonce } from '../utils/nonce';
 import { encryptMessage, encryptStructuredPayload } from './crypto';
 import { ethers, Signer } from '../utils/ethers';
@@ -17,7 +17,7 @@ export async function sendEncryptedMessage({
   senderSignKeyPair,
   timestamp
 }: {
-  contract: LogChain;
+  contract: LogChainV1;
   topic: string;
   message: string;
   recipientPubKey: Uint8Array;
@@ -53,7 +53,7 @@ export async function initiateHandshake({
   includeIdentityProof = false,
   signer
 }: {
-  contract: LogChain;
+  contract: LogChainV1;
   recipientAddress: string;
   identityPubKey: Uint8Array;         // x25519 pubkey
   ephemeralPubKey: Uint8Array;        // Ephemeral pubkey used for this handshake
@@ -106,7 +106,7 @@ export async function respondToHandshake({
   signer,
   includeIdentityProof = false
 }: {
-  contract: LogChain;
+  contract: LogChainV1;
   inResponseTo: string;
   initiatorPubKey: Uint8Array;
   responderIdentityPubKey: Uint8Array;

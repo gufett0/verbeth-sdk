@@ -6,11 +6,15 @@
   "scripts": {
     "build": "tsc",
     "test": "hardhat test",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "deploy:local": "hardhat ignition deploy ignition/modules/LogChain.ts --network localhost --strategy create2",
+    "deploy:testnet": "hardhat ignition deploy ignition/modules/LogChain.ts --network baseSepolia --strategy create2"
   },
   "dependencies": {
     "@noble/curves": "^1.8.1",
     "@noble/secp256k1": "^2.2.3",
+    "@openzeppelin/contracts-upgradeable": "^5.3.0",
+    "dotenv": "^16.5.0",
     "ethers": "^6.7.0",
     "tweetnacl": "^1.0.3"
   },

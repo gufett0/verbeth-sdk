@@ -4,6 +4,9 @@ import "@nomicfoundation/hardhat-ignition";
 import 'hardhat-gas-reporter';
 import "@typechain/hardhat";
 import "hardhat-dependency-compiler";
+import * as dotenv from "dotenv";
+
+dotenv.config();
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -16,6 +19,18 @@ const config: HardhatUserConfig = {
       },
     ],
   },
+  networks: {
+    baseSepolia: {
+      url: "https://base-sepolia-rpc.publicnode.com",
+      accounts: [`${process.env.PRIVATE_KEY}`],
+      timeout: 60000,
+    },
+    localhost: {
+      url: "http://127.0.0.1:8545", 
+      timeout: 60000,
+    },
+
+  },
   gasReporter: {
     enabled: true,
     currency: 'USD',
@@ -23,6 +38,14 @@ const config: HardhatUserConfig = {
   typechain: {
     outDir: 'typechain-types',
     target: 'ethers-v6',
+  },
+  ignition: {
+    strategyConfig: {
+      create2: {
+        // "VERBETH" in hex
+        salt: "0x5645524245544800000000000000000000000000000000000000000000000000", 
+      },
+    },
   },
   paths: {
     sources: "./contracts",
@@ -32,6 +55,7 @@ const config: HardhatUserConfig = {
   },
   dependencyCompiler: {
     paths: [
+      "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol",
       "test/contracts/TestSmartAccount.sol",
     ]
   }

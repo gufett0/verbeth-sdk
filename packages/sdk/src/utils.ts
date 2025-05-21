@@ -5,6 +5,7 @@ import {
   Contract,
   JsonRpcProvider
 } from "ethers";
+import { convertPublicKeyToX25519 } from './utils/x25519';
 
 /**
  * Generalized EIP-1271 signature verification
@@ -81,7 +82,6 @@ export function verifyEOAIdentity(
       );
     }
 
-    const { convertPublicKeyToX25519 } = require("../utils/x25519");
     const derivedX25519 = convertPublicKeyToX25519(pubkeyBytes);
     
     return Buffer.from(derivedX25519).equals(Buffer.from(expectedIdentityPubKey));

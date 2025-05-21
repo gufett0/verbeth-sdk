@@ -2,7 +2,7 @@
     "extends": "../../tsconfig.base.json",
     "include": ["contracts", "ignition", "tasks", "test", "utils"],
     "compilerOptions": {
-      "types": ["hardhat"],
+      "types": ["hardhat", "node", "chai"],
       "paths": {
         "@sdk/*": ["../sdk/src/*"]
       },

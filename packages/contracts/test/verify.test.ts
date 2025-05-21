@@ -5,7 +5,7 @@ import { verifyEOAIdentity } from "../src/utils";
 import { convertPublicKeyToX25519 } from "../utils/x25519";
 import { LogChainV1, TestSmartAccount } from "../typechain-types";
 import { encryptStructuredPayload } from "../src/crypto";
-import { HandshakeResponseContent } from "../src/payload";
+import { HandshakeResponseContent } from "@verbeth/sdk/src/payload";
 import nacl from 'tweetnacl';
 
 describe("Handshake Identity Verification", function () {

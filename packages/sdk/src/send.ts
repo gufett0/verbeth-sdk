@@ -1,7 +1,13 @@
-import { LogChainV1 } from '../typechain-types';
-import { getNextNonce } from '../utils/nonce';
+import { 
+  keccak256,
+  toUtf8Bytes,
+  hexlify,
+  solidityPacked,
+  Signer
+} from "ethers";
+import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
+import { getNextNonce } from './utils/nonce';
 import { encryptMessage, encryptStructuredPayload } from './crypto';
-import { ethers, Signer } from '../utils/ethers';
 import nacl from 'tweetnacl';
 import { HandshakeResponseContent, HandshakeContent, serializeHandshakeContent } from './payload';
 
@@ -61,8 +67,8 @@ export async function initiateHandshake({
   includeIdentityProof?: boolean;  // Nuovo optional
   signer?: Signer;                // Nuovo optional
 }) {
-  const recipientHash = ethers.keccak256(
-    ethers.toUtf8Bytes('contact:' + recipientAddress.toLowerCase())
+  const recipientHash = keccak256(
+    toUtf8Bytes('contact:' + recipientAddress.toLowerCase())
   );
 
   const handshakeContent: HandshakeContent = {
@@ -70,7 +76,7 @@ export async function initiateHandshake({
   };
 
   if (includeIdentityProof && signer) {
-    const bindingMessage = ethers.solidityPacked( 
+    const bindingMessage = solidityPacked( 
       ['bytes32', 'bytes32', 'string'],
       [identityPubKey, recipientHash, 'VerbEth-Handshake-v1']
     );
@@ -78,7 +84,7 @@ export async function initiateHandshake({
     const signature = await signer.signMessage(bindingMessage);
     handshakeContent.identityProof = {
       signature,
-      message: ethers.keccak256(bindingMessage)
+      message: keccak256(bindingMessage)
     };
   }
 
@@ -87,9 +93,9 @@ export async function initiateHandshake({
 
   await contract.initiateHandshake(
     recipientHash,
-    ethers.hexlify(identityPubKey), 
-    ethers.hexlify(ephemeralPubKey),
-    ethers.toUtf8Bytes(serializedPayload)
+    hexlify(identityPubKey), 
+    hexlify(ephemeralPubKey),
+    toUtf8Bytes(serializedPayload)
   );
 }
 
@@ -119,7 +125,7 @@ export async function respondToHandshake({
   
   let identityProof;
   if (includeIdentityProof && signer) {
-    const bindingMessage = ethers.solidityPacked(
+    const bindingMessage = solidityPacked(
       ['bytes32', 'bytes32', 'string'],
       [responderIdentityPubKey, inResponseTo, 'VerbEth-HSResponse-v1']
     );
@@ -127,7 +133,7 @@ export async function respondToHandshake({
     const signature = await signer.signMessage(bindingMessage);
     identityProof = {
       signature,
-      message: ethers.keccak256(bindingMessage)
+      message: keccak256(bindingMessage)
     };
   }
   
@@ -146,5 +152,5 @@ export async function respondToHandshake({
     ephemeralKeyPair.publicKey
   );
   
-  return contract.respondToHandshake(inResponseTo, ethers.toUtf8Bytes(payload));
+  return contract.respondToHandshake(inResponseTo, toUtf8Bytes(payload));
 }

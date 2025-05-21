@@ -1,5 +1,5 @@
 import { expect } from 'chai';
-import { ethers } from '../utils/ethers';
+import { ethers } from '../utils/hardhat-ethers';
 import { LogChainV1 } from '../typechain-types';
 
 describe('LogChain', () => {

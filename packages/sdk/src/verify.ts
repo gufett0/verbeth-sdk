@@ -1,8 +1,11 @@
-import { ethers, Provider } from "../utils/ethers";
+import { 
+  getBytes, 
+  JsonRpcProvider
+} from "ethers";
 import { decryptHandshakeResponse } from "./crypto";
 import { HandshakeLog, HandshakeResponseLog } from "./types";
 import { parseHandshakePayload } from "./payload";
-import { verifyEIP1271Signature, isSmartContract, verifyEOAIdentity } from "./utils";
+import { verifyEIP1271Signature, isSmartContract, verifyEOAIdentity } from "./utils"
 
 // ============= Handshake Verification =============
 
@@ -12,13 +15,13 @@ import { verifyEIP1271Signature, isSmartContract, verifyEOAIdentity } from "./ut
 export async function verifyHandshakeIdentity(
   handshakeEvent: HandshakeLog,
   rawTxHex?: string,
-  provider?: Provider
+  provider?: JsonRpcProvider
 ): Promise<boolean> {
   // Parse payload to check for identity proof
   const content = parseHandshakePayload(handshakeEvent.plaintextPayload);
   
   // Verify identity key matches sender's pubkey derived from transaction
-  const identityPubKey = ethers.getBytes(handshakeEvent.identityPubKey);
+  const identityPubKey = getBytes(handshakeEvent.identityPubKey);
   
   // If no proof provided, assume EOA and verify via transaction
   if (!content.identityProof) {
@@ -58,7 +61,7 @@ export async function verifyHandshakeResponseIdentity(
   responseEvent: HandshakeResponseLog,
   responderIdentityPubKey: Uint8Array,
   initiatorEphemeralSecretKey: Uint8Array,
-  provider?: Provider
+  provider?: JsonRpcProvider
 ): Promise<boolean> {
   // First try EOA verification
   const eoaResult = verifyEOAIdentity(rawTxHex, responderIdentityPubKey);
@@ -92,10 +95,10 @@ async function verifySmartAccountHandshakeResponse(
   responseEvent: HandshakeResponseLog,
   responderIdentityPubKey: Uint8Array,
   initiatorEphemeralSecretKey: Uint8Array,
-  provider: Provider
+  provider: JsonRpcProvider
 ): Promise<boolean> {
   try {
-    const bytesData = ethers.getBytes(responseEvent.ciphertext);
+    const bytesData = getBytes(responseEvent.ciphertext);
     const jsonString = new TextDecoder().decode(bytesData);
     const responseContent = decryptHandshakeResponse(
       jsonString,

@@ -1,0 +1,11 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "include": ["contracts", "ignition", "tasks", "test", "utils"],
+    "compilerOptions": {
+      "types": ["hardhat"],
+      "paths": {
+        "@sdk/*": ["../sdk/src/*"]
+      },
+      "outDir": "dist"
+    }
+  }

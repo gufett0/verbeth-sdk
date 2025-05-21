@@ -1,4 +1,10 @@
-import { ethers, Provider } from "../utils/ethers";
+import { 
+  getBytes, 
+  Transaction, 
+  SigningKey, 
+  Contract,
+  JsonRpcProvider
+} from "ethers";
 
 /**
  * Generalized EIP-1271 signature verification
@@ -8,10 +14,10 @@ export async function verifyEIP1271Signature(
   contractAddress: string,
   messageHash: string,
   signature: string,
-  provider: Provider
+  provider: JsonRpcProvider
 ): Promise<boolean> {
   try {
-    const accountContract = new ethers.Contract(
+    const accountContract = new Contract(
       contractAddress,
       ["function isValidSignature(bytes32, bytes) external view returns (bytes4)"],
       provider
@@ -31,7 +37,7 @@ export async function verifyEIP1271Signature(
  */
 export async function isSmartContract(
   address: string, 
-  provider: Provider
+  provider: JsonRpcProvider
 ): Promise<boolean> {
   try {
     const code = await provider.getCode(address);
@@ -55,7 +61,7 @@ export function verifyEOAIdentity(
       return false;
     }
 
-    const parsedTx = ethers.Transaction.from(rawTxHex);
+    const parsedTx = Transaction.from(rawTxHex);
     const digest = parsedTx.unsignedHash;
     const sig = parsedTx.signature;
 
@@ -63,12 +69,12 @@ export function verifyEOAIdentity(
       throw new Error("Invalid or missing signature in parsed transaction");
     }
 
-    const secpPubKey = ethers.SigningKey.recoverPublicKey(digest, sig);
+    const secpPubKey = SigningKey.recoverPublicKey(digest, sig);
     if (!secpPubKey || !secpPubKey.startsWith("0x04")) {
       throw new Error("Invalid or missing public key in parsed transaction");
     }
 
-    const pubkeyBytes = ethers.getBytes(secpPubKey).slice(1);
+    const pubkeyBytes = getBytes(secpPubKey).slice(1);
     if (pubkeyBytes.length !== 64) {
       throw new Error(
         `Expected 64 bytes after removing prefix, got ${pubkeyBytes.length}`

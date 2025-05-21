@@ -1,0 +1,38 @@
+{
+    "name": "@verbeth/contracts",
+    "version": "0.1.0",
+    "private": true,
+    "main": "contracts/LogChainV1.sol",
+    "devDependencies": {
+      "@nomicfoundation/hardhat-ignition": "^0.15.10",
+      "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+      "@openzeppelin/contracts": "^5.3.0",
+      "@typechain/ethers-v6": "^0.5.1",
+      "@typechain/hardhat": "^9.1.0",
+      "@types/chai": "^4.3.20",
+      "chai": "^4.5.0",
+      "hardhat": "^2.23.0",
+      "hardhat-dependency-compiler": "^1.2.1",
+      "hardhat-gas-reporter": "^1.0.9",
+      "typechain": "^8.3.2",
+      "typescript": "^5.0.0",
+      "@openzeppelin/contracts-upgradeable": "^5.3.0",
+      "@openzeppelin/hardhat-upgrades": "^3.9.0",
+      "dotenv": "^16.5.0",
+      "ethers": "^6.7.0"
+    },
+    "scripts": {
+      "build": "hardhat compile",
+      "test": "hardhat test",
+      "deploy:local": "hardhat ignition deploy ignition/modules/LogChain.ts --network localhost --strategy create2",
+      "deploy:testnet": "hardhat ignition deploy ignition/modules/LogChain.ts --network baseSepolia --strategy create2"
+    },
+    "exports": {
+      "./typechain-types/*": "./typechain-types/*",
+      "./typechain-types": "./typechain-types/index.ts"
+    },
+    "files": [
+      "typechain-types"
+    ]
+  }
+  

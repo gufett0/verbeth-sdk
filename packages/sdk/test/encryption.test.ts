@@ -1,4 +1,4 @@
-import { expect } from 'chai';
+import { describe, it, expect } from 'vitest';
 import nacl from 'tweetnacl';
 import { 
   encryptMessage, 
@@ -36,7 +36,7 @@ describe('Encryption/Decryption', () => {
       );
 
       const decrypted = decryptMessage(encrypted, recipientKey.secretKey, senderSignKey.publicKey);
-      expect(decrypted).to.equal(message);
+      expect(decrypted).toBe(message);
     });
 
     it('should return null on decryption with wrong recipient key', () => {
@@ -56,7 +56,7 @@ describe('Encryption/Decryption', () => {
       );
 
       const decrypted = decryptMessage(encrypted, wrongKey.secretKey, senderSignKey.publicKey);
-      expect(decrypted).to.be.null;
+      expect(decrypted).toBeNull();
     });
 
     it('should fail to decrypt if payload is tampered', () => {
@@ -79,7 +79,7 @@ describe('Encryption/Decryption', () => {
       const tampered = JSON.stringify(parsed);
 
       const decrypted = decryptMessage(tampered, recipientKey.secretKey, senderSignKey.publicKey);
-      expect(decrypted).to.be.null;
+      expect(decrypted).toBeNull();
     });
 
     it('should work with the structured message format', () => {
@@ -109,7 +109,7 @@ describe('Encryption/Decryption', () => {
         senderSignKey.publicKey
       );
 
-      expect(decrypted).to.deep.equal(messagePayload);
+      expect(decrypted).toEqual(messagePayload);
     });
   });
 
@@ -139,10 +139,10 @@ describe('Encryption/Decryption', () => {
         initiatorEphemeralKey.secretKey
       );
 
-      expect(decrypted).to.not.be.null;
-      expect(decrypted!.identityPubKey).to.deep.equal(identityPubKey);
-      expect(decrypted!.ephemeralPubKey).to.deep.equal(ephemeralPubKey);
-      expect(decrypted!.note).to.equal(note);
+      expect(decrypted).not.toBeNull();
+      expect(decrypted!.identityPubKey).toEqual(identityPubKey);
+      expect(decrypted!.ephemeralPubKey).toEqual(ephemeralPubKey);
+      expect(decrypted!.note).toBe(note);
     });
 
     it('should handle handshake response with identity proof', () => {
@@ -174,8 +174,8 @@ describe('Encryption/Decryption', () => {
         initiatorEphemeralKey.secretKey
       );
 
-      expect(decrypted).to.not.be.null;
-      expect(decrypted!.identityProof).to.deep.equal(identityProof);
+      expect(decrypted).not.toBeNull();
+      expect(decrypted!.identityProof).toEqual(identityProof);
     });
   });
 
@@ -190,9 +190,9 @@ describe('Encryption/Decryption', () => {
       const encoded = encodeHandshakePayload(payload);
       const decoded = decodeHandshakePayload(encoded);
 
-      expect(decoded.identityPubKey).to.deep.equal(payload.identityPubKey);
-      expect(decoded.ephemeralPubKey).to.deep.equal(payload.ephemeralPubKey);
-      expect(decoded.plaintextPayload).to.equal('hello bob');
+      expect(decoded.identityPubKey).toEqual(payload.identityPubKey);
+      expect(decoded.ephemeralPubKey).toEqual(payload.ephemeralPubKey);
+      expect(decoded.plaintextPayload).toBe('hello bob');
     });
 
     it('should encode and decode response content correctly', () => {
@@ -209,9 +209,9 @@ describe('Encryption/Decryption', () => {
       const encoded = encodeHandshakeResponseContent(content);
       const decoded = decodeHandshakeResponseContent(encoded);
 
-      expect(decoded.identityPubKey).to.deep.equal(identityPubKey);
-      expect(decoded.ephemeralPubKey).to.deep.equal(ephemeralPubKey);
-      expect(decoded.note).to.equal(note);
+      expect(decoded.identityPubKey).toEqual(identityPubKey);
+      expect(decoded.ephemeralPubKey).toEqual(ephemeralPubKey);
+      expect(decoded.note).toBe(note);
     });
   });
 
@@ -241,7 +241,7 @@ describe('Encryption/Decryption', () => {
       };
 
       const decrypted = decryptMessage(mockLog.ciphertext, recipientKey.secretKey, senderSignKey.publicKey);
-      expect(decrypted).to.equal(message);
+      expect(decrypted).toBe(message);
     });
   });
 });

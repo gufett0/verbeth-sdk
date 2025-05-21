@@ -4,6 +4,7 @@ import "@nomicfoundation/hardhat-ignition";
 import 'hardhat-gas-reporter';
 import "@typechain/hardhat";
 import "hardhat-dependency-compiler";
+import '@openzeppelin/hardhat-upgrades';
 import * as dotenv from "dotenv";
 
 dotenv.config();

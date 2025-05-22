@@ -44,7 +44,7 @@ export async function sendEncryptedMessage({
 
   const nonce = getNextNonce(senderAddress, topic);
 
-  return contract.sendMessage(ciphertext, topic, timestamp, nonce);
+  return contract.sendMessage(toUtf8Bytes(ciphertext), topic, timestamp, nonce);
 }
 
 /**

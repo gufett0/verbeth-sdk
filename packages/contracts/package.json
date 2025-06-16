@@ -25,7 +25,8 @@
       "build": "hardhat compile",
       "test": "hardhat test",
       "deploy:local": "hardhat ignition deploy ignition/modules/LogChain.ts --network localhost --strategy create2",
-      "deploy:testnet": "hardhat ignition deploy ignition/modules/LogChain.ts --network baseSepolia --strategy create2"
+      "deploy:testnet": "hardhat ignition deploy ignition/modules/LogChain.ts --network baseSepolia --strategy create2",
+      "deploy:mainnet": "hardhat ignition deploy ignition/modules/LogChain.ts --network base --strategy create2"
     },
     "exports": {
       "./typechain-types/*": "./typechain-types/*",

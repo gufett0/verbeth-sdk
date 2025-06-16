@@ -11,18 +11,18 @@ export function HeliosProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       await initHelios();
 
+      // Usa l'API come era nel codice originale
       const helios = new RawHelios(
         {
-          executionRpc:   "https://base-rpc.publicnode.com",
+          executionRpc: "https://base-rpc.publicnode.com",
           executionVerifiableApi: "https://base-rpc.publicnode.com",
-          //consensusRpc:   "http://localhost:5174/consensus", // stesso origin, niente CORS
-          //consensusRpc: "https://base.operationsolarstorm.org",
-          // non serve consensusRpc: viene risolto da helios-opstack,
-          dbType:         "localstorage",
-          network:       "base" as Network,
+          // consensusRpc: "https://base.operationsolarstorm.org", // opzionale per opstack
+          dbType: "localstorage",
+          network: "base" as Network,
         },
         "opstack"
       );
+
       await helios.sync();
       await helios.waitSynced(); 
 

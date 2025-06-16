@@ -1,6 +1,0 @@
-[submodule "apps/helios-demo/external/helios"]
-	path = apps/helios-demo/external/helios
-	url = https://github.com/a16z/helios.git
-[submodule "apps/helios-demo/helios"]
-	path = apps/helios-demo/helios
-	url = https://github.com/a16z/helios.git

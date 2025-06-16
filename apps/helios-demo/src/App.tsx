@@ -9,6 +9,9 @@ import { MessageInput } from "./components/MessageInput";
 import { ConversationList } from "./components/ConversationList";
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
 
+import { VerbEthDebugPanel } from './components/VerbEthDebugPanel';
+
+
 // Wrapper component to handle async contract creation
 function MessageInputWrapper({ 
     walletClient, 
@@ -137,6 +140,22 @@ export default function App() {
                     <ConnectButton />
                 </div>
             </header>
+
+            {/* LOG */}
+<div className="bg-white rounded-xl border border-gray-200 p-6">
+    <h2 className="text-lg font-semibold text-gray-900 mb-4">Transaction Log</h2>
+    <div className="relative">
+        <textarea
+            ref={logRef}
+            className="w-full h-48 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 font-mono text-sm resize-none outline-none"
+            placeholder="Transaction logs will appear here..."
+            readOnly
+        />
+    </div>
+</div>
+
+{/* DEBUG PANEL */}
+{address && <VerbEthDebugPanel userAddress={address} />}
 
             {/* MAIN: due colonne, sinistra conversazioni + status, destra chat + log */}
             <main className="max-w-4xl mx-auto px-4 py-8">

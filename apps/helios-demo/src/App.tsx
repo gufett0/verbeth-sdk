@@ -3,13 +3,16 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useWalletClient } from 'wagmi';
 import { WalletClient } from 'viem';
 import nacl from "tweetnacl";
-import { Contract, BrowserProvider, AbiCoder, hashMessage } from "ethers";
+import { Contract, BrowserProvider, AbiCoder } from "ethers";
 import { useHelios } from "./helios";
 import { MessageInput } from "./components/MessageInput";
 import { ConversationList } from "./components/ConversationList";
-import { useMessageListener } from './hooks/useMessageListener'; // <-- ADD THIS
-import { useConversationManager } from './hooks/useConversationManager'; // <-- ADD THIS
+import { useMessageListener } from './hooks/useMessageListener'; 
+import { useConversationManager } from './hooks/useConversationManager'; 
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
+import { deriveIdentityKeyFromAddress } from './utils/keyDerivation';
+import { encodeHandshakePayload, decodeHandshakePayload } from '@verbeth/sdk';
+
 
 import { VerbEthDebugPanel } from './components/VerbEthDebugPanel';
 
@@ -65,6 +68,7 @@ function MessageInputWrapper({
             senderAddress={senderAddress}
             senderSignKeyPair={senderSignKeyPair}
             recipientAddress={recipientAddress}
+            walletClient={walletClient} 
             onMessageSent={onMessageSent}
             onError={onError}
             disabled={disabled}
@@ -172,7 +176,12 @@ export default function App() {
             
             if (typeof identityPubKeyBytes === 'string' && identityPubKeyBytes.startsWith('0x')) {
                 const hexString = identityPubKeyBytes.slice(2);
-                identityPubKey = new Uint8Array(hexString.match(/.{2}/g).map(byte => parseInt(byte, 16)));
+                const matchResult = hexString.match(/.{2}/g);
+                if (matchResult) {
+                    identityPubKey = new Uint8Array(matchResult.map(byte => parseInt(byte, 16)));
+                } else {
+                    throw new Error("Failed to parse hex string into bytes");
+                }
             } else {
                 identityPubKey = identityPubKeyBytes instanceof Uint8Array 
                     ? identityPubKeyBytes 
@@ -181,7 +190,12 @@ export default function App() {
             
             if (typeof ephemeralPubKeyBytes === 'string' && ephemeralPubKeyBytes.startsWith('0x')) {
                 const hexString = ephemeralPubKeyBytes.slice(2);
-                ephemeralPubKey = new Uint8Array(hexString.match(/.{2}/g).map(byte => parseInt(byte, 16)));
+                const matchResult = hexString.match(/.{2}/g);
+                if (matchResult) {
+                    ephemeralPubKey = new Uint8Array(matchResult.map(byte => parseInt(byte, 16)));
+                } else {
+                    throw new Error("Failed to parse hex string into bytes");
+                }
             } else {
                 ephemeralPubKey = ephemeralPubKeyBytes instanceof Uint8Array 
                     ? ephemeralPubKeyBytes 
@@ -194,7 +208,11 @@ export default function App() {
             if (typeof plaintextPayloadBytes === 'string' && plaintextPayloadBytes.startsWith('0x')) {
                 // It's a hex string, convert to bytes then to string
                 const hexString = plaintextPayloadBytes.slice(2);
-                const bytes = new Uint8Array(hexString.match(/.{2}/g).map(byte => parseInt(byte, 16)));
+                const matchResult = hexString.match(/.{2}/g);
+                if (!matchResult) {
+                    throw new Error("Failed to parse hex string into bytes");
+                }
+                const bytes = new Uint8Array(matchResult.map(byte => parseInt(byte, 16)));
                 plaintextPayload = new TextDecoder().decode(bytes);
             } else {
                 // It's already bytes
@@ -267,56 +285,6 @@ export default function App() {
         onIncomingHandshake: handleIncomingHandshake
     });
 
-    // ADD: Function to derive identity key from Ethereum address (like in SDK tests)
-    const deriveIdentityKeyFromAddress = useCallback(async (walletClient: WalletClient, address: string): Promise<Uint8Array> => {
-        try {
-            // Create a deterministic message to sign (similar to SDK test approach)
-            const message = `VerbEth Identity Key for ${address.toLowerCase()}`;
-            
-            // Sign the message with the wallet
-            const signature = await walletClient.signMessage({
-                account: address as `0x${string}`,
-                message: message
-            });
-
-            // Recover the public key from the signature (like in SDK tests)
-            const messageHash = hashMessage(message);
-            const recoveredPubKey = SigningKey.recoverPublicKey(messageHash, signature);
-            
-            if (!recoveredPubKey || !recoveredPubKey.startsWith("0x04")) {
-                throw new Error("Invalid recovered public key");
-            }
-
-            // Convert from secp256k1 to X25519 (like in SDK)
-            const pubkeyBytes = getBytes(recoveredPubKey).slice(1); // Remove 0x04 prefix
-            if (pubkeyBytes.length !== 64) {
-                throw new Error(`Expected 64 bytes, got ${pubkeyBytes.length}`);
-            }
-
-            // Use the SDK's conversion function if available, otherwise use hash-based approach
-            let identityPubKey: Uint8Array;
-            try {
-                identityPubKey = convertPublicKeyToX25519(pubkeyBytes);
-            } catch (error) {
-                console.warn('SDK convertPublicKeyToX25519 not available, using hash fallback:', error);
-                identityPubKey = nacl.hash(pubkeyBytes).slice(0, 32);
-            }
-            
-            console.log('Derived identity key from signature:', {
-                address,
-                message,
-                signature: signature.slice(0, 10) + '...',
-                recoveredPubKey: recoveredPubKey.slice(0, 10) + '...',
-                identityPubKey: Array.from(identityPubKey),
-                length: identityPubKey.length
-            });
-            
-            return identityPubKey;
-        } catch (error) {
-            console.error('Failed to derive identity key from signature:', error);
-            throw error;
-        }
-    }, []);
 
     // ADD: Component for handshake card with custom response
     const HandshakeCard = ({ handshake, onAccept }: { handshake: any, onAccept: (handshake: any, response: string) => Promise<void> }) => {
@@ -410,7 +378,7 @@ export default function App() {
                 // Fallback to manual parsing for backwards compatibility
                 if (typeof handshake.identityPubKey === 'string' && handshake.identityPubKey.startsWith('0x')) {
                     const hexString = handshake.identityPubKey.slice(2);
-                    identityPubKey = new Uint8Array(hexString.match(/.{2}/g)!.map(byte => parseInt(byte, 16)));
+                    identityPubKey = new Uint8Array(hexString.match(/.{2}/g)!.map((byte: string) => parseInt(byte, 16)));
                 } else if (Array.isArray(handshake.identityPubKey)) {
                     identityPubKey = new Uint8Array(handshake.identityPubKey);
                 } else if (handshake.identityPubKey instanceof Uint8Array) {
@@ -454,7 +422,8 @@ export default function App() {
                 initiatorAddress: handshake.sender,
                 initiatorPubKey: identityPubKey,
                 responseMessage: responseMessage,
-                responderIdentityPubKey: responderIdentityPubKey
+                walletClient: walletClient,
+                responderAddress: address
             });
 
             // Remove from pending handshakes and update localStorage
@@ -484,7 +453,8 @@ export default function App() {
             console.error('Failed to accept handshake:', error);
             if (logRef.current) {
                 const timestamp = new Date().toLocaleTimeString();
-                logRef.current.value += `[${timestamp}] ❌ Failed to accept handshake: ${error.message}\n`;
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                logRef.current.value += `[${timestamp}] ❌ Failed to accept handshake: ${errorMessage}\n`;
                 logRef.current.scrollTop = logRef.current.scrollHeight;
             }
         }
@@ -599,10 +569,10 @@ export default function App() {
                         {/* MESSAGING */}
                         {selectedRecipient && ready && address && walletClient ? (
                             <MessageInputWrapper
-                                walletClient={walletClient}
                                 senderAddress={address}
                                 senderSignKeyPair={senderSign}
                                 recipientAddress={selectedRecipient}
+                                walletClient={walletClient}
                                 onMessageSent={handleMessageSent}
                                 onError={handleError}
                                 disabled={!ready}

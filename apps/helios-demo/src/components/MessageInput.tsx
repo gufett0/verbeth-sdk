@@ -1,6 +1,6 @@
 // apps/helios-demo/src/components/MessageInput.tsx
 import { useState } from 'react';
-import { Contract } from 'ethers';
+import { WalletClient } from 'viem';
 import nacl from 'tweetnacl';
 import { useConversationManager } from '../hooks/useConversationManager';
 import type { LogChainV1 } from '@verbeth/contracts/typechain-types';
@@ -10,6 +10,7 @@ interface MessageInputProps {
   senderAddress: string;
   senderSignKeyPair: nacl.SignKeyPair;
   recipientAddress: string;
+  walletClient: WalletClient; 
   onMessageSent?: (result: any) => void;
   onError?: (error: any) => void;
   disabled?: boolean;
@@ -20,6 +21,7 @@ export function MessageInput({
   senderAddress,
   senderSignKeyPair,
   recipientAddress,
+  walletClient, 
   onMessageSent,
   onError,
   disabled = false
@@ -38,7 +40,8 @@ export function MessageInput({
         recipientAddress,
         message: message.trim(),
         senderAddress,
-        senderSignKeyPair
+        senderSignKeyPair,
+        walletClient 
       });
 
       setMessage('');
@@ -90,36 +93,27 @@ export function MessageInput({
               ? 'bg-green-100 text-green-800' 
               : 'bg-yellow-100 text-yellow-800'
           }`}>
-            {conversation.status === 'established' ? 'Connected' : 'Connecting'}
+            {conversation.status === 'established' ? 'Secure' : 'Pending'}
           </div>
         )}
       </div>
-
+      
       <div className="space-y-4">
-        <div>
-          <label htmlFor="message" className="block text-sm font-medium text-gray-700 mb-2">
-            Message
-          </label>
-          <textarea
-            id="message"
-            rows={4}
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none resize-none"
-            placeholder={getPlaceholderText()}
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            disabled={disabled || conversation.status === 'initiated'}
-          />
-        </div>
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          placeholder={getPlaceholderText()}
+          className="w-full p-3 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          rows={3}
+          disabled={disabled || isLoading || conversation.status === 'initiated'}
+        />
         
         <button
           onClick={handleSend}
           disabled={isButtonDisabled}
-          className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center space-x-2"
+          className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
         >
-          {isLoading && (
-            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-          )}
-          <span>{getButtonText()}</span>
+          {getButtonText()}
         </button>
       </div>
     </div>

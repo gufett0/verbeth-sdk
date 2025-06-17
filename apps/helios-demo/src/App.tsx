@@ -13,9 +13,6 @@ import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
 import { deriveIdentityKeyFromAddress } from './utils/keyDerivation';
 import { encodeHandshakePayload, decodeHandshakePayload } from '@verbeth/sdk';
 
-
-import { VerbEthDebugPanel } from './components/VerbEthDebugPanel';
-
 // Wrapper component to handle async contract creation
 function MessageInputWrapper({ 
     walletClient, 
@@ -598,8 +595,6 @@ export default function App() {
                             </div>
                         </div>
 
-                        {/* DEBUG PANEL */}
-                        {address && <VerbEthDebugPanel userAddress={address} />}
                     </div>
                 </div>
             </main>

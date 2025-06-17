@@ -298,15 +298,13 @@ export function useConversationManager() {
     initiatorAddress: string;
     initiatorPubKey: Uint8Array;
     responseMessage?: string;
-    senderSignKeyPair: nacl.SignKeyPair;
   }) => {
     const { 
       contract, 
       inResponseTo, 
       initiatorAddress, 
       initiatorPubKey, 
-      responseMessage,
-      senderSignKeyPair 
+      responseMessage 
     } = options;
 
     try {

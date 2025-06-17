@@ -3,7 +3,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useWalletClient } from 'wagmi';
 import { WalletClient } from 'viem';
 import nacl from "tweetnacl";
-import { Contract, BrowserProvider, AbiCoder } from "ethers";
+import { Contract, BrowserProvider, AbiCoder, hashMessage } from "ethers";
 import { useHelios } from "./helios";
 import { MessageInput } from "./components/MessageInput";
 import { ConversationList } from "./components/ConversationList";
@@ -213,12 +213,26 @@ export default function App() {
             // Clean the sender address by removing leading zeros
             const cleanSenderAddress = handshake.sender.replace(/^0x0+/, '0x');
             
+            // Create HandshakePayload using SDK structure
+            const handshakePayload = {
+                identityPubKey,
+                ephemeralPubKey,
+                plaintextPayload
+            };
+            
+            // Encode using SDK for consistent serialization
+            const encodedPayload = encodeHandshakePayload(handshakePayload);
+            
             const handshakeWithParsedData = {
                 ...handshake,
-                sender: cleanSenderAddress, // Use cleaned address
-                identityPubKey: Array.from(identityPubKey), // Store as regular array for JSON serialization
-                ephemeralPubKey: Array.from(ephemeralPubKey), // Store as regular array for JSON serialization
-                plaintextPayload
+                sender: cleanSenderAddress,
+                // Store encoded payload for consistent serialization
+                encodedPayload,
+                // Keep readable fields for UI
+                plaintextPayload,
+                // Store arrays for immediate use (will be reconstructed from encodedPayload on reload)
+                identityPubKey: Array.from(identityPubKey),
+                ephemeralPubKey: Array.from(ephemeralPubKey)
             };
             
             // Check if we already have this handshake to avoid duplicates
@@ -253,9 +267,116 @@ export default function App() {
         onIncomingHandshake: handleIncomingHandshake
     });
 
-    // ADD: Function to accept handshake
-    const acceptHandshake = useCallback(async (handshake: any) => {
-        if (!walletClient || !ready) return;
+    // ADD: Function to derive identity key from Ethereum address (like in SDK tests)
+    const deriveIdentityKeyFromAddress = useCallback(async (walletClient: WalletClient, address: string): Promise<Uint8Array> => {
+        try {
+            // Create a deterministic message to sign (similar to SDK test approach)
+            const message = `VerbEth Identity Key for ${address.toLowerCase()}`;
+            
+            // Sign the message with the wallet
+            const signature = await walletClient.signMessage({
+                account: address as `0x${string}`,
+                message: message
+            });
+
+            // Recover the public key from the signature (like in SDK tests)
+            const messageHash = hashMessage(message);
+            const recoveredPubKey = SigningKey.recoverPublicKey(messageHash, signature);
+            
+            if (!recoveredPubKey || !recoveredPubKey.startsWith("0x04")) {
+                throw new Error("Invalid recovered public key");
+            }
+
+            // Convert from secp256k1 to X25519 (like in SDK)
+            const pubkeyBytes = getBytes(recoveredPubKey).slice(1); // Remove 0x04 prefix
+            if (pubkeyBytes.length !== 64) {
+                throw new Error(`Expected 64 bytes, got ${pubkeyBytes.length}`);
+            }
+
+            // Use the SDK's conversion function if available, otherwise use hash-based approach
+            let identityPubKey: Uint8Array;
+            try {
+                identityPubKey = convertPublicKeyToX25519(pubkeyBytes);
+            } catch (error) {
+                console.warn('SDK convertPublicKeyToX25519 not available, using hash fallback:', error);
+                identityPubKey = nacl.hash(pubkeyBytes).slice(0, 32);
+            }
+            
+            console.log('Derived identity key from signature:', {
+                address,
+                message,
+                signature: signature.slice(0, 10) + '...',
+                recoveredPubKey: recoveredPubKey.slice(0, 10) + '...',
+                identityPubKey: Array.from(identityPubKey),
+                length: identityPubKey.length
+            });
+            
+            return identityPubKey;
+        } catch (error) {
+            console.error('Failed to derive identity key from signature:', error);
+            throw error;
+        }
+    }, []);
+
+    // ADD: Component for handshake card with custom response
+    const HandshakeCard = ({ handshake, onAccept }: { handshake: any, onAccept: (handshake: any, response: string) => Promise<void> }) => {
+        const [responseMessage, setResponseMessage] = useState("Hello! Nice to meet you 👋");
+        const [isResponding, setIsResponding] = useState(false);
+
+        const handleAccept = async () => {
+            setIsResponding(true);
+            try {
+                await onAccept(handshake, responseMessage);
+            } catch (error) {
+                console.error('Failed to accept handshake:', error);
+            } finally {
+                setIsResponding(false);
+            }
+        };
+
+        return (
+            <div className="bg-white rounded-lg p-4 border border-yellow-200">
+                <div className="space-y-3">
+                    <div>
+                        <p className="font-medium text-gray-900">From: {handshake.sender}</p>
+                        <p className="text-sm text-gray-600">Message: "{handshake.plaintextPayload}"</p>
+                        <p className="text-sm text-gray-500">Block: {handshake.blockNumber}</p>
+                    </div>
+                    
+                    <div>
+                        <label htmlFor={`response-${handshake.transactionHash}`} className="block text-sm font-medium text-gray-700 mb-1">
+                            Your Response:
+                        </label>
+                        <textarea
+                            id={`response-${handshake.transactionHash}`}
+                            rows={2}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                            placeholder="Type your response message..."
+                            value={responseMessage}
+                            onChange={(e) => setResponseMessage(e.target.value)}
+                            disabled={isResponding}
+                        />
+                    </div>
+                    
+                    <div className="flex justify-end space-x-2">
+                        <button
+                            onClick={handleAccept}
+                            disabled={isResponding || !responseMessage.trim()}
+                            className="bg-green-600 text-white px-4 py-2 rounded-md text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
+                        >
+                            {isResponding && (
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            )}
+                            <span>{isResponding ? 'Responding...' : 'Accept & Respond'}</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+    // ADD: Function to accept handshake with custom response message
+    const acceptHandshake = useCallback(async (handshake: any, responseMessage: string) => {
+        if (!walletClient || !ready || !address) return;
 
         try {
             const provider = new BrowserProvider({
@@ -266,51 +387,74 @@ export default function App() {
             const signer = await provider.getSigner();
             const contract = new Contract(LOGCHAIN_ADDR, ABI, signer) as unknown as LogChainV1;
 
-            // Ensure the identityPubKey is a proper Uint8Array with correct length
+            console.log('Debug handshake object:', {
+                handshake,
+                hasEncodedPayload: !!handshake.encodedPayload,
+                identityPubKey: handshake.identityPubKey,
+                identityPubKeyType: typeof handshake.identityPubKey
+            });
+
+            // Use SDK to decode the handshake payload if available
             let identityPubKey: Uint8Array;
             
-            if (typeof handshake.identityPubKey === 'string' && handshake.identityPubKey.startsWith('0x')) {
-                // It's a hex string from fresh parsing
-                const hexString = handshake.identityPubKey.slice(2);
-                if (hexString.length !== 64) { // 32 bytes = 64 hex chars
-                    throw new Error(`Invalid identityPubKey hex length: ${hexString.length}, expected 64`);
-                }
-                identityPubKey = new Uint8Array(hexString.match(/.{2}/g)!.map(byte => parseInt(byte, 16)));
-            } else if (Array.isArray(handshake.identityPubKey)) {
-                // It's a regular array from localStorage
-                if (handshake.identityPubKey.length !== 32) {
-                    throw new Error(`Invalid identityPubKey array length: ${handshake.identityPubKey.length}, expected 32`);
-                }
-                identityPubKey = new Uint8Array(handshake.identityPubKey);
-            } else if (handshake.identityPubKey instanceof Uint8Array) {
-                // Already a Uint8Array
-                if (handshake.identityPubKey.length !== 32) {
-                    throw new Error(`Invalid identityPubKey Uint8Array length: ${handshake.identityPubKey.length}, expected 32`);
-                }
-                identityPubKey = handshake.identityPubKey;
+            if (handshake.encodedPayload) {
+                // Decode using SDK function
+                const decodedPayload = decodeHandshakePayload(handshake.encodedPayload);
+                identityPubKey = decodedPayload.identityPubKey;
+                console.log('Decoded handshake using SDK:', {
+                    plaintextPayload: decodedPayload.plaintextPayload,
+                    identityPubKey: Array.from(decodedPayload.identityPubKey),
+                    ephemeralPubKey: Array.from(decodedPayload.ephemeralPubKey)
+                });
             } else {
-                throw new Error(`Unsupported identityPubKey type: ${typeof handshake.identityPubKey}`);
+                // Fallback to manual parsing for backwards compatibility
+                if (typeof handshake.identityPubKey === 'string' && handshake.identityPubKey.startsWith('0x')) {
+                    const hexString = handshake.identityPubKey.slice(2);
+                    identityPubKey = new Uint8Array(hexString.match(/.{2}/g)!.map(byte => parseInt(byte, 16)));
+                } else if (Array.isArray(handshake.identityPubKey)) {
+                    identityPubKey = new Uint8Array(handshake.identityPubKey);
+                } else if (handshake.identityPubKey instanceof Uint8Array) {
+                    identityPubKey = handshake.identityPubKey;
+                } else if (handshake.identityPubKey && typeof handshake.identityPubKey === 'object') {
+                    const keys = Object.keys(handshake.identityPubKey);
+                    if (keys.length === 32 && keys.every(k => !isNaN(parseInt(k)))) {
+                        const array = new Array(32);
+                        for (let i = 0; i < 32; i++) {
+                            array[i] = handshake.identityPubKey[i];
+                        }
+                        identityPubKey = new Uint8Array(array);
+                    } else {
+                        throw new Error(`Unsupported identityPubKey object structure. Keys: ${JSON.stringify(keys.slice(0, 5))}`);
+                    }
+                } else {
+                    throw new Error(`Unsupported identityPubKey type: ${typeof handshake.identityPubKey}, value: ${JSON.stringify(handshake.identityPubKey)}`);
+                }
             }
-
-            console.log('Accepting handshake with:', {
-                sender: handshake.sender,
-                identityPubKey: Array.from(identityPubKey),
-                length: identityPubKey.length,
-                plaintextPayload: handshake.plaintextPayload
-            });
 
             // Validate key length
             if (identityPubKey.length !== 32) {
                 throw new Error(`Invalid key length: ${identityPubKey.length}, expected 32 bytes`);
             }
 
+            // Derive deterministic identity key for this address
+            const responderIdentityPubKey = await deriveIdentityKeyFromAddress(walletClient, address);
+
+            console.log('Accepting handshake with:', {
+                sender: handshake.sender,
+                identityPubKey: Array.from(identityPubKey),
+                length: identityPubKey.length,
+                plaintextPayload: handshake.plaintextPayload,
+                responseMessage,
+                responderIdentityPubKey: Array.from(responderIdentityPubKey)
+            });
+
             await respondToIncomingHandshake({
                 contract,
                 inResponseTo: handshake.transactionHash,
                 initiatorAddress: handshake.sender,
-                initiatorPubKey: identityPubKey, // Use the properly converted Uint8Array
-                responseMessage: "Hello! Handshake accepted.",
-                senderSignKeyPair: senderSign
+                initiatorPubKey: identityPubKey,
+                responseMessage: responseMessage,
+                responderIdentityPubKey: responderIdentityPubKey
             });
 
             // Remove from pending handshakes and update localStorage
@@ -333,7 +477,7 @@ export default function App() {
 
             if (logRef.current) {
                 const timestamp = new Date().toLocaleTimeString();
-                logRef.current.value += `[${timestamp}] ✅ Accepted handshake from ${handshake.sender}\n`;
+                logRef.current.value += `[${timestamp}] ✅ Responded to handshake from ${handshake.sender}: "${responseMessage}"\n`;
                 logRef.current.scrollTop = logRef.current.scrollHeight;
             }
         } catch (error) {
@@ -344,7 +488,7 @@ export default function App() {
                 logRef.current.scrollTop = logRef.current.scrollHeight;
             }
         }
-    }, [walletClient, ready, senderSign, respondToIncomingHandshake, address]);
+    }, [walletClient, ready, respondToIncomingHandshake, address, deriveIdentityKeyFromAddress]);
 
     const handleMessageSent = (result: any) => {
         if (logRef.current) {
@@ -431,23 +575,13 @@ export default function App() {
                                 <h2 className="text-lg font-semibold text-yellow-900 mb-4">
                                     🤝 Pending Handshakes ({pendingHandshakes.length})
                                 </h2>
-                                <div className="space-y-3">
+                                <div className="space-y-4">
                                     {pendingHandshakes.map((handshake) => (
-                                        <div key={`${handshake.transactionHash}-${handshake.blockNumber}`} className="bg-white rounded-lg p-4 border border-yellow-200">
-                                            <div className="flex justify-between items-start">
-                                                <div>
-                                                    <p className="font-medium text-gray-900">From: {handshake.sender}</p>
-                                                    <p className="text-sm text-gray-600">Message: "{handshake.plaintextPayload}"</p>
-                                                    <p className="text-sm text-gray-500">Block: {handshake.blockNumber}</p>
-                                                </div>
-                                                <button
-                                                    onClick={() => acceptHandshake(handshake)}
-                                                    className="bg-green-600 text-white px-3 py-1 rounded-md text-sm hover:bg-green-700"
-                                                >
-                                                    Accept
-                                                </button>
-                                            </div>
-                                        </div>
+                                        <HandshakeCard 
+                                            key={`${handshake.transactionHash}-${handshake.blockNumber}`}
+                                            handshake={handshake}
+                                            onAccept={acceptHandshake}
+                                        />
                                     ))}
                                 </div>
                             </div>

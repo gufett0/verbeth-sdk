@@ -1,4 +1,4 @@
-// Enhanced useMessageListener with historical scanning
+// Enhanced useMessageListener with improved error handling
 import { useEffect, useCallback, useRef } from 'react';
 import { BrowserProvider, keccak256, toUtf8Bytes } from 'ethers';
 import { useConversationManager } from './useConversationManager';
@@ -89,35 +89,82 @@ export function useMessageListener({
     }
   }, [onIncomingMessage, onIncomingHandshake, handleHandshakeResponse, userAddress]);
 
-  // Scan historical logs when first connecting
+  // Scan historical logs with improved error handling
   const scanHistoricalLogs = useCallback(async () => {
     if (!readProvider || !userAddress) return;
 
     try {
       const currentBlock = await readProvider.getBlockNumber();
-      const fromBlock = Math.max(currentBlock - 100, 0); // Scan last 100 blocks
+      let fromBlock = Math.max(currentBlock - 100, 0);
       
       console.log(`🔍 Scanning historical logs from block ${fromBlock} to ${currentBlock}`);
       
-      const filter = {
-        address: LOGCHAIN_ADDR,
-        fromBlock,
-        toBlock: currentBlock,
-        topics: [
-          [EVENT_SIGNATURES.MessageSent, EVENT_SIGNATURES.Handshake, EVENT_SIGNATURES.HandshakeResponse]
-        ]
-      };
-      
-      const historicalLogs = await readProvider.getLogs(filter);
-      console.log(`📜 Found ${historicalLogs.length} historical logs`);
-      
-      for (const log of historicalLogs) {
-        await handleNewLog(log);
+      // Try with full range first
+      try {
+        const filter = {
+          address: LOGCHAIN_ADDR,
+          fromBlock,
+          toBlock: currentBlock,
+          topics: [
+            [EVENT_SIGNATURES.MessageSent, EVENT_SIGNATURES.Handshake, EVENT_SIGNATURES.HandshakeResponse]
+          ]
+        };
+        
+        const historicalLogs = await readProvider.getLogs(filter);
+        console.log(`📜 Found ${historicalLogs.length} historical logs`);
+        
+        for (const log of historicalLogs) {
+          await handleNewLog(log);
+        }
+        
+        lastScannedBlock.current = currentBlock;
+      } catch (receiptError) {
+        console.warn('⚠️ Full range scan failed, trying smaller chunks...', receiptError);
+        
+        // Fallback: scan in smaller chunks
+        const chunkSize = 20;
+        let scannedLogs = 0;
+        
+        for (let start = fromBlock; start <= currentBlock; start += chunkSize) {
+          try {
+            const end = Math.min(start + chunkSize - 1, currentBlock);
+            const filter = {
+              address: LOGCHAIN_ADDR,
+              fromBlock: start,
+              toBlock: end,
+              topics: [
+                [EVENT_SIGNATURES.MessageSent, EVENT_SIGNATURES.Handshake, EVENT_SIGNATURES.HandshakeResponse]
+              ]
+            };
+            
+            const chunkLogs = await readProvider.getLogs(filter);
+            
+            for (const log of chunkLogs) {
+              await handleNewLog(log);
+            }
+            
+            scannedLogs += chunkLogs.length;
+          } catch (chunkError) {
+            console.warn(`⚠️ Failed to scan chunk ${start}-${Math.min(start + chunkSize - 1, currentBlock)}:`, chunkError);
+            // Continue with next chunk
+          }
+        }
+        
+        console.log(`📜 Fallback scan completed: ${scannedLogs} logs found`);
+        lastScannedBlock.current = currentBlock;
       }
       
-      lastScannedBlock.current = currentBlock;
     } catch (error) {
       console.error('Error scanning historical logs:', error);
+      // Set a conservative last scanned block to avoid infinite retries
+      if (!lastScannedBlock.current) {
+        try {
+          const currentBlock = await readProvider.getBlockNumber();
+          lastScannedBlock.current = currentBlock;
+        } catch (blockError) {
+          console.error('Failed to get current block number:', blockError);
+        }
+      }
     }
   }, [readProvider, userAddress, handleNewLog]);
 
@@ -158,6 +205,7 @@ export function useMessageListener({
             lastScannedBlock.current = blockNumber;
           } catch (error) {
             console.error('Error fetching logs for block:', blockNumber, error);
+            // Don't fail completely, just log and continue
           }
         });
         

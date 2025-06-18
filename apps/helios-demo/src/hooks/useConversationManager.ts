@@ -1,14 +1,16 @@
-// Enhanced useConversationManager with persistent conversation state and message history
+// Enhanced useConversationManager with handshake response verification
 import { useState, useCallback, useEffect } from 'react';
 import nacl from 'tweetnacl';
 import { 
   initiateHandshake, 
   respondToHandshake, 
   sendEncryptedMessage,
-  decryptHandshakeResponse 
+  decryptHandshakeResponse,
+  verifyHandshakeResponseIdentity
 } from '@verbeth/sdk';
 import type { LogChainV1 } from '@verbeth/contracts/typechain-types';
 import { WalletClient } from 'viem';
+import { BrowserProvider } from 'ethers';
 import { deriveIdentityKeyFromAddress } from '../utils/keyDerivation';
 
 interface ConversationMessage {
@@ -55,111 +57,137 @@ const loadRecipientsFromStorage = (): string[] => {
   try {
     const stored = localStorage.getItem(STORAGE_KEYS.RECIPIENTS);
     return stored ? JSON.parse(stored) : [];
-  } catch (error) {
-    console.warn('Failed to load recipients from localStorage:', error);
+  } catch {
     return [];
   }
 };
 
-const saveRecipientsToStorage = (recipients: string[]): void => {
+const saveRecipientsToStorage = (recipients: string[]) => {
   try {
     localStorage.setItem(STORAGE_KEYS.RECIPIENTS, JSON.stringify(recipients));
   } catch (error) {
-    console.warn('Failed to save recipients to localStorage:', error);
+    console.error('Failed to save recipients to localStorage:', error);
   }
 };
 
-const loadConversationsFromStorage = (): Map<string, ConversationState> => {
-  try {
-    const stored = localStorage.getItem(STORAGE_KEYS.CONVERSATIONS);
-    if (stored) {
-      const conversationsData = JSON.parse(stored);
-      const conversationsMap = new Map<string, ConversationState>();
-      
-      // Reconstruct conversations with message history
-      Object.entries(conversationsData).forEach(([address, state]: [string, any]) => {
-        conversationsMap.set(address, {
-          recipientAddress: address,
-          status: state.status || 'none',
-          lastMessageTime: state.lastMessageTime,
-          messages: state.messages || [],
-          // Don't restore ephemeral keys for security
-          // Don't restore recipientPubKey as it's a Uint8Array and needs fresh exchange
-        });
-      });
-      
-      return conversationsMap;
-    }
-  } catch (error) {
-    console.warn('Failed to load conversations from localStorage:', error);
-  }
-  return new Map();
-};
-
-const saveConversationsToStorage = (conversations: Map<string, ConversationState>): void => {
-  try {
-    const conversationsData: Record<string, any> = {};
-    conversations.forEach((state, address) => {
-      // Store conversation data with message history
-      conversationsData[address] = {
-        recipientAddress: state.recipientAddress,
-        status: state.status,
-        lastMessageTime: state.lastMessageTime,
-        messages: state.messages,
-        // Note: recipientPubKey and ephemeralKeys intentionally excluded for security
-      };
-    });
-    localStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(conversationsData));
-  } catch (error) {
-    console.warn('Failed to save conversations to localStorage:', error);
-  }
-};
-
-const addRecipientToStorage = (recipientAddress: string): void => {
+const addRecipientToStorage = (recipient: string) => {
   const recipients = loadRecipientsFromStorage();
-  const normalizedAddress = recipientAddress.toLowerCase();
+  const normalizedRecipient = recipient.toLowerCase();
   
-  if (!recipients.includes(normalizedAddress)) {
-    recipients.push(normalizedAddress);
+  if (!recipients.includes(normalizedRecipient)) {
+    recipients.push(normalizedRecipient);
     saveRecipientsToStorage(recipients);
   }
 };
 
-export function useConversationManager() {
-  const [conversations, setConversations] = useState<Map<string, ConversationState>>(() => {
-    // Initialize from localStorage on mount
-    return loadConversationsFromStorage();
-  });
+const defaultTopic = '0x' + '01'.repeat(32); // Topic for regular messages
 
-  // Load recipients from localStorage and ensure all stored recipients have conversation entries
+export function useConversationManager() {
+  const [conversations, setConversations] = useState<Map<string, ConversationState>>(new Map());
+  const [isLoaded, setIsLoaded] = useState(false);
+  // Load conversations from localStorage on mount
   useEffect(() => {
-    const storedRecipients = loadRecipientsFromStorage();
-    if (storedRecipients.length > 0) {
-      setConversations(prev => {
-        const newMap = new Map(prev);
-        storedRecipients.forEach(address => {
-          if (!newMap.has(address)) {
-            newMap.set(address, {
-              recipientAddress: address,
-              status: 'none',
-              messages: []
-            });
+    try {
+      const stored = localStorage.getItem(STORAGE_KEYS.CONVERSATIONS);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        const conversationMap = new Map<string, ConversationState>();
+        
+        Object.entries(parsed).forEach(([address, conv]: [string, any]) => {
+          try {
+            const conversation: ConversationState = {
+              ...conv,
+              recipientPubKey: conv.recipientPubKey ? new Uint8Array(conv.recipientPubKey) : undefined,
+              ephemeralKeys: conv.ephemeralKeys ? {
+                ourEphemeralPrivateKey: conv.ephemeralKeys.ourEphemeralPrivateKey ? 
+                  new Uint8Array(conv.ephemeralKeys.ourEphemeralPrivateKey) : undefined,
+                theirEphemeralPublicKey: conv.ephemeralKeys.theirEphemeralPublicKey ? 
+                  new Uint8Array(conv.ephemeralKeys.theirEphemeralPublicKey) : undefined,
+              } : undefined
+            };
+            conversationMap.set(address, conversation);
+          } catch (convError) {
+            console.error(`Error processing conversation for ${address}:`, convError);
           }
         });
-        return newMap;
-      });
+        
+        setConversations(conversationMap);
+      }
+      setIsLoaded(true);
+    } catch (error) {
+      console.error('Failed to load conversations from localStorage:', error);
+      setIsLoaded(true);
     }
   }, []);
 
-  // Save conversations to localStorage whenever they change
+  // Save conversations to localStorage whenever conversations change (but only after initial load)
   useEffect(() => {
-    saveConversationsToStorage(conversations);
-  }, [conversations]);
-  
+    if (!isLoaded) return;
+    
+    try {
+      const conversationObj: Record<string, any> = {};
+      conversations.forEach((conv, address) => {
+        conversationObj[address] = {
+          ...conv,
+          recipientPubKey: conv.recipientPubKey ? Array.from(conv.recipientPubKey) : undefined,
+          ephemeralKeys: conv.ephemeralKeys ? {
+            ourEphemeralPrivateKey: conv.ephemeralKeys.ourEphemeralPrivateKey ? 
+              Array.from(conv.ephemeralKeys.ourEphemeralPrivateKey) : undefined,
+            theirEphemeralPublicKey: conv.ephemeralKeys.theirEphemeralPublicKey ? 
+              Array.from(conv.ephemeralKeys.theirEphemeralPublicKey) : undefined,
+          } : undefined
+        };
+      });
+      
+      localStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(conversationObj));
+    } catch (error) {
+      console.error('Failed to save conversations to localStorage:', error);
+    }
+  }, [conversations, isLoaded]);
+
+  const addRecipient = useCallback((address: string): string => {
+    if (!address || typeof address !== 'string') {
+      throw new Error('Invalid address');
+    }
+    
+    const trimmed = address.trim();
+    if (!trimmed.match(/^0x[a-fA-F0-9]{40}$/)) {
+      throw new Error('Invalid Ethereum address format');
+    }
+    
+    const normalizedAddress = trimmed.toLowerCase();
+    addRecipientToStorage(normalizedAddress);
+    
+    return normalizedAddress;
+  }, []);
+
+  const removeRecipient = useCallback((address: string) => {
+    const normalizedAddress = address.toLowerCase();
+    const recipients = loadRecipientsFromStorage();
+    const updated = recipients.filter(r => r !== normalizedAddress);
+    saveRecipientsToStorage(updated);
+    
+    // Also remove from conversations
+    setConversations(prev => {
+      const newMap = new Map(prev);
+      newMap.delete(normalizedAddress);
+      return newMap;
+    });
+  }, []);
+
+  const clearAllRecipients = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEYS.RECIPIENTS);
+    localStorage.removeItem(STORAGE_KEYS.CONVERSATIONS);
+    setConversations(new Map());
+  }, []);
+
+  const getStoredRecipients = useCallback(() => {
+    return loadRecipientsFromStorage();
+  }, []);
+
   const getConversation = useCallback((recipientAddress: string): ConversationState => {
     const normalizedAddress = recipientAddress.toLowerCase();
-    const existing = conversations.get(normalizedAddress);
-    return existing || {
+    return conversations.get(normalizedAddress) || {
       recipientAddress: normalizedAddress,
       status: 'none',
       messages: []
@@ -229,71 +257,19 @@ export function useConversationManager() {
     });
   }, []);
 
-  const addRecipient = useCallback((recipientAddress: string) => {
-    const normalizedAddress = recipientAddress.toLowerCase();
-    
-    // Validate Ethereum address format
-    if (!/^0x[a-fA-F0-9]{40}$/.test(recipientAddress)) {
-      throw new Error('Invalid Ethereum address format');
-    }
-    
-    // Add to localStorage
-    addRecipientToStorage(normalizedAddress);
-    
-    // Add to conversations if not already present
-    setConversations(prev => {
-      const newMap = new Map(prev);
-      if (!newMap.has(normalizedAddress)) {
-        newMap.set(normalizedAddress, {
-          recipientAddress: normalizedAddress,
-          status: 'none',
-          messages: []
-        });
-      }
-      return newMap;
-    });
-    
-    return normalizedAddress;
-  }, []);
-
-  const removeRecipient = useCallback((recipientAddress: string) => {
-    const normalizedAddress = recipientAddress.toLowerCase();
-    
-    // Remove from localStorage
-    const recipients = loadRecipientsFromStorage();
-    const filteredRecipients = recipients.filter(addr => addr !== normalizedAddress);
-    saveRecipientsToStorage(filteredRecipients);
-    
-    // Remove from conversations
-    setConversations(prev => {
-      const newMap = new Map(prev);
-      newMap.delete(normalizedAddress);
-      return newMap;
-    });
-  }, []);
-
-  const clearAllRecipients = useCallback(() => {
-    // Clear localStorage
-    try {
-      localStorage.removeItem(STORAGE_KEYS.RECIPIENTS);
-      localStorage.removeItem(STORAGE_KEYS.CONVERSATIONS);
-    } catch (error) {
-      console.warn('Failed to clear recipients from localStorage:', error);
-    }
-    
-    // Clear state
-    setConversations(new Map());
-  }, []);
-
-  const getStoredRecipients = useCallback((): string[] => {
-    return loadRecipientsFromStorage();
-  }, []);
-
   const sendMessage = useCallback(async (options: MessageOptions) => {
-    const { contract, recipientAddress, message, senderAddress, senderSignKeyPair, walletClient, topic } = options;
+    const { 
+      contract, 
+      recipientAddress, 
+      message, 
+      senderAddress, 
+      senderSignKeyPair, 
+      walletClient, 
+      topic = defaultTopic 
+    } = options;
+
     const conversation = getConversation(recipientAddress);
     const timestamp = Math.floor(Date.now() / 1000);
-    const defaultTopic = topic || "0x" + "00".repeat(32);
     const messageId = `msg_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
 
     // Add message to conversation immediately with 'sending' status
@@ -415,17 +391,20 @@ export function useConversationManager() {
   const processHandshakeResponse = useCallback(async (
     responseData: any,
     walletClient: WalletClient,
-    userAddress: string
+    userAddress: string,
+    readProvider?: BrowserProvider
   ) => {
     try {
       // Find the conversation that initiated the handshake
       const conversations_array = Array.from(conversations.values());
       const initiatedConversation = conversations_array.find(conv => 
-        conv.status === 'initiated' && conv.ephemeralKeys?.ourEphemeralPrivateKey
+        conv.status === 'initiated' && 
+        conv.ephemeralKeys?.ourEphemeralPrivateKey &&
+        conv.recipientAddress.toLowerCase() === responseData.responder.toLowerCase()
       );
 
       if (!initiatedConversation || !initiatedConversation.ephemeralKeys?.ourEphemeralPrivateKey) {
-        console.warn('No matching initiated conversation found for handshake response');
+        console.warn('No matching initiated conversation found for handshake response from:', responseData.responder);
         return false;
       }
 
@@ -440,7 +419,27 @@ export function useConversationManager() {
         return false;
       }
 
-      console.log('Successfully decrypted handshake response:', decryptedResponse);
+      // Verify handshake response identity if we have transaction data and provider
+      if (responseData.rawTxHex && readProvider) {
+        const responseEvent = {
+          inResponseTo: responseData.inResponseTo,
+          responder: responseData.responder,
+          ciphertext: responseData.rawData.ciphertextBytes
+        };
+
+        const isVerified = await verifyHandshakeResponseIdentity(
+          responseData.rawTxHex,
+          responseEvent,
+          decryptedResponse.identityPubKey,
+          initiatedConversation.ephemeralKeys.ourEphemeralPrivateKey,
+          readProvider
+        );
+
+        if (!isVerified) {
+          console.warn('⚠️ Handshake response verification failed');
+          return false;
+        }
+      }
 
       // Update conversation with recipient's public key
       await handleHandshakeResponse(

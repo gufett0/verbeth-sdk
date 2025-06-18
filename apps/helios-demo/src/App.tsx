@@ -8,26 +8,26 @@ import { useHelios } from "./helios";
 import { MessageInput } from "./components/MessageInput";
 import { ConversationList } from "./components/ConversationList";
 import { ConversationView } from "./components/ConversationView";
-import { useMessageListener } from './hooks/useMessageListener'; 
-import { useConversationManager } from './hooks/useConversationManager'; 
+import { useMessageListener } from './hooks/useMessageListener';
+import { useConversationManager } from './hooks/useConversationManager';
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
 import { deriveIdentityKeyFromAddress } from './utils/keyDerivation';
-import { 
-  encodeHandshakePayload, 
-  decodeHandshakePayload,
-  decryptHandshakeResponse,
-  parseHandshakePayload 
+import {
+    encodeHandshakePayload,
+    decodeHandshakePayload,
+    decryptHandshakeResponse,
+    parseHandshakePayload
 } from '@verbeth/sdk';
 
 // Wrapper component to handle async contract creation
-function MessageInputWrapper({ 
-    walletClient, 
-    senderAddress, 
-    senderSignKeyPair, 
+function MessageInputWrapper({
+    walletClient,
+    senderAddress,
+    senderSignKeyPair,
     recipientAddress,
     onMessageSent,
     onError,
-    disabled 
+    disabled
 }: {
     walletClient: WalletClient;
     senderAddress: string;
@@ -71,7 +71,7 @@ function MessageInputWrapper({
             senderAddress={senderAddress}
             senderSignKeyPair={senderSignKeyPair}
             recipientAddress={recipientAddress}
-            walletClient={walletClient} 
+            walletClient={walletClient}
             onMessageSent={onMessageSent}
             onError={onError}
             disabled={disabled}
@@ -171,14 +171,14 @@ export default function App() {
             try {
                 const stored = localStorage.getItem(`verbeth_handshakes_${address.toLowerCase()}`);
                 const handshakes = stored ? JSON.parse(stored) : [];
-                
+
                 // Filter out old handshakes (older than 24 hours)
                 const now = Date.now();
                 const dayInMs = 24 * 60 * 60 * 1000;
                 const recentHandshakes = handshakes.filter((h: any) => (now - h.timestamp) < dayInMs);
-                
+
                 setPendingHandshakes(recentHandshakes);
-                
+
                 // Update localStorage if we filtered out old ones
                 if (recentHandshakes.length !== handshakes.length) {
                     if (recentHandshakes.length === 0) {
@@ -219,7 +219,7 @@ export default function App() {
 
     const handleIncomingHandshake = useCallback((handshake: any) => {
         console.log('🤝 Incoming handshake:', handshake);
-        
+
         // Check if we already have this handshake to avoid duplicates
         setPendingHandshakes(prev => {
             const exists = prev.some(h => h.transactionHash === handshake.transactionHash);
@@ -229,7 +229,7 @@ export default function App() {
             }
             return [...prev, handshake];
         });
-        
+
         if (logRef.current) {
             const timestamp = new Date().toLocaleTimeString();
             logRef.current.value += `[${timestamp}] 🤝 Received handshake from ${handshake.sender}: "${handshake.plaintextPayload}"\n`;
@@ -237,18 +237,22 @@ export default function App() {
         }
     }, []);
 
-    // NEW: Handle incoming handshake responses
     const handleIncomingHandshakeResponse = useCallback(async (response: any) => {
         console.log('📧 Incoming handshake response:', response);
-        
+
         if (!walletClient || !address) {
             console.warn('Wallet not ready for processing handshake response');
             return;
         }
 
         try {
-            const success = await processHandshakeResponse(response, walletClient, address);
-            
+            const success = await processHandshakeResponse(
+                response,
+                walletClient,
+                address,
+                readProvider || undefined // Pass readProvider for verification
+            );
+
             if (success) {
                 if (logRef.current) {
                     const timestamp = new Date().toLocaleTimeString();
@@ -270,7 +274,7 @@ export default function App() {
                 logRef.current.scrollTop = logRef.current.scrollHeight;
             }
         }
-    }, [processHandshakeResponse, walletClient, address]);
+    }, [processHandshakeResponse, walletClient, address, readProvider]);
 
     useMessageListener({
         readProvider,
@@ -304,7 +308,7 @@ export default function App() {
                         <p className="text-sm text-gray-600">Message: "{handshake.plaintextPayload}"</p>
                         <p className="text-sm text-gray-500">Block: {handshake.blockNumber}</p>
                     </div>
-                    
+
                     <div>
                         <label htmlFor={`response-${handshake.transactionHash}`} className="block text-sm font-medium text-gray-700 mb-1">
                             Your Response:
@@ -319,7 +323,7 @@ export default function App() {
                             disabled={isResponding}
                         />
                     </div>
-                    
+
                     <div className="flex justify-end space-x-2">
                         <button
                             onClick={handleAccept}
@@ -339,91 +343,117 @@ export default function App() {
 
     // Function to accept handshake with custom response message
     const acceptHandshake = useCallback(async (handshake: any, responseMessage: string) => {
-        if (!walletClient || !ready || !address) return;
+    if (!walletClient || !ready || !address) return;
 
-        try {
-            const provider = new BrowserProvider({
-                request: async ({ method, params }) => {
-                    return await walletClient.request({ method: method as any, params });
-                }
-            });
-            const signer = await provider.getSigner();
-            const contract = new Contract(LOGCHAIN_ADDR, ABI, signer) as unknown as LogChainV1;
-
-            console.log('Debug handshake object:', {
-                handshake,
-                hasHandshakeContent: !!handshake.handshakeContent,
-                identityPubKey: handshake.identityPubKey,
-                identityPubKeyType: typeof handshake.identityPubKey
-            });
-
-            // Use handshake data parsed by SDK
-            let identityPubKey: Uint8Array;
-            
-            if (Array.isArray(handshake.identityPubKey)) {
-                identityPubKey = new Uint8Array(handshake.identityPubKey);
-            } else if (handshake.identityPubKey instanceof Uint8Array) {
-                identityPubKey = handshake.identityPubKey;
-            } else {
-                throw new Error(`Unsupported identityPubKey type: ${typeof handshake.identityPubKey}`);
-            }
-
-            // Validate key length
-            if (identityPubKey.length !== 32) {
-                throw new Error(`Invalid key length: ${identityPubKey.length}, expected 32 bytes`);
-            }
-
-            console.log('Accepting handshake with:', {
-                sender: handshake.sender,
-                identityPubKey: Array.from(identityPubKey),
-                length: identityPubKey.length,
-                plaintextPayload: handshake.plaintextPayload,
-                responseMessage
-            });
-
-            await respondToIncomingHandshake({
-                contract,
-                inResponseTo: handshake.transactionHash,
-                initiatorAddress: handshake.sender,
-                initiatorPubKey: identityPubKey,
-                responseMessage: responseMessage,
-                walletClient: walletClient,
-                responderAddress: address
-            });
-
-            // Remove from pending handshakes and update localStorage
-            setPendingHandshakes(prev => {
-                const updated = prev.filter(h => h.transactionHash !== handshake.transactionHash);
-                // Update localStorage immediately
-                if (address) {
-                    try {
-                        if (updated.length === 0) {
-                            localStorage.removeItem(`verbeth_handshakes_${address.toLowerCase()}`);
-                        } else {
-                            localStorage.setItem(`verbeth_handshakes_${address.toLowerCase()}`, JSON.stringify(updated));
-                        }
-                    } catch (error) {
-                        console.warn('Failed to update localStorage:', error);
-                    }
-                }
-                return updated;
-            });
-
+    try {
+        // Check if handshake was verified during initial processing
+        if (handshake.verified === false) {
+            console.warn('⚠️ Attempting to accept unverified handshake');
             if (logRef.current) {
                 const timestamp = new Date().toLocaleTimeString();
-                logRef.current.value += `[${timestamp}] ✅ Responded to handshake from ${handshake.sender}: "${responseMessage}"\n`;
+                logRef.current.value += `[${timestamp}] ⚠️ Warning: Accepting unverified handshake from ${handshake.sender}\n`;
                 logRef.current.scrollTop = logRef.current.scrollHeight;
             }
-        } catch (error) {
-            console.error('Failed to accept handshake:', error);
-            if (logRef.current) {
-                const timestamp = new Date().toLocaleTimeString();
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                logRef.current.value += `[${timestamp}] ❌ Failed to accept handshake: ${errorMessage}\n`;
-                logRef.current.scrollTop = logRef.current.scrollHeight;
-            }
+        } else if (handshake.verified === true) {
+            console.log('✅ Processing verified handshake');
+        } else {
+            console.log('⚠️ Handshake verification status unknown (legacy format)');
         }
-    }, [walletClient, ready, respondToIncomingHandshake, address]);
+
+        const provider = new BrowserProvider({
+            request: async ({ method, params }) => {
+                return await walletClient.request({ method: method as any, params });
+            }
+        });
+        const signer = await provider.getSigner();
+        const contract = new Contract(LOGCHAIN_ADDR, ABI, signer) as unknown as LogChainV1;
+
+        console.log('Debug handshake object:', {
+            handshake,
+            hasHandshakeContent: !!handshake.handshakeContent,
+            identityPubKey: handshake.identityPubKey,
+            identityPubKeyType: typeof handshake.identityPubKey,
+            verified: handshake.verified
+        });
+
+        // Use handshake data parsed by SDK
+        let identityPubKey: Uint8Array;
+        
+        if (Array.isArray(handshake.identityPubKey)) {
+            identityPubKey = new Uint8Array(handshake.identityPubKey);
+        } else if (handshake.identityPubKey instanceof Uint8Array) {
+            identityPubKey = handshake.identityPubKey;
+        } else if (typeof handshake.identityPubKey === 'string') {
+            // Handle hex string (most common case)
+            const hexString = handshake.identityPubKey.startsWith('0x') 
+                ? handshake.identityPubKey.slice(2) 
+                : handshake.identityPubKey;
+            identityPubKey = new Uint8Array(
+                hexString.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []
+            );
+        } else {
+            throw new Error(`Unsupported identityPubKey type: ${typeof handshake.identityPubKey}`);
+        }
+
+        // Validate key length
+        if (identityPubKey.length !== 32) {
+            throw new Error(`Invalid key length: ${identityPubKey.length}, expected 32 bytes`);
+        }
+
+        console.log('Accepting handshake with:', {
+            sender: handshake.sender,
+            identityPubKey: Array.from(identityPubKey),
+            length: identityPubKey.length,
+            plaintextPayload: handshake.plaintextPayload,
+            responseMessage,
+            verified: handshake.verified
+        });
+
+        await respondToIncomingHandshake({
+            contract,
+            inResponseTo: handshake.transactionHash,
+            initiatorAddress: handshake.sender,
+            initiatorPubKey: identityPubKey,
+            responseMessage: responseMessage,
+            walletClient: walletClient,
+            responderAddress: address
+        });
+
+        // Remove from pending handshakes and update localStorage
+        setPendingHandshakes(prev => {
+            const updated = prev.filter(h => h.transactionHash !== handshake.transactionHash);
+            // Update localStorage immediately
+            if (address) {
+                try {
+                    if (updated.length === 0) {
+                        localStorage.removeItem(`verbeth_handshakes_${address.toLowerCase()}`);
+                    } else {
+                        localStorage.setItem(`verbeth_handshakes_${address.toLowerCase()}`, JSON.stringify(updated));
+                    }
+                } catch (error) {
+                    console.warn('Failed to update localStorage:', error);
+                }
+            }
+            return updated;
+        });
+
+        if (logRef.current) {
+            const timestamp = new Date().toLocaleTimeString();
+            const verificationStatus = handshake.verified === true ? '✅ (verified)' : 
+                                     handshake.verified === false ? '⚠️ (unverified)' : '❓ (unknown)';
+            logRef.current.value += `[${timestamp}] ✅ Responded to handshake ${verificationStatus} from ${handshake.sender}: "${responseMessage}"\n`;
+            logRef.current.scrollTop = logRef.current.scrollHeight;
+        }
+    } catch (error) {
+        console.error('Failed to accept handshake:', error);
+        if (logRef.current) {
+            const timestamp = new Date().toLocaleTimeString();
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            logRef.current.value += `[${timestamp}] ❌ Failed to accept handshake: ${errorMessage}\n`;
+            logRef.current.scrollTop = logRef.current.scrollHeight;
+        }
+    }
+}, [walletClient, ready, respondToIncomingHandshake, address]);
 
     const handleMessageSent = (result: any) => {
         if (logRef.current) {
@@ -446,7 +476,7 @@ export default function App() {
     const StatusBadge = ({ status, children }: { status: 'success' | 'warning' | 'error', children: React.ReactNode }) => {
         const colors = {
             success: 'bg-green-100 text-green-800 border-green-200',
-            warning: 'bg-yellow-100 text-yellow-800 border-yellow-200', 
+            warning: 'bg-yellow-100 text-yellow-800 border-yellow-200',
             error: 'bg-red-100 text-red-800 border-red-200'
         };
         return (
@@ -512,7 +542,7 @@ export default function App() {
                                 </h2>
                                 <div className="space-y-4">
                                     {pendingHandshakes.map((handshake) => (
-                                        <HandshakeCard 
+                                        <HandshakeCard
                                             key={`${handshake.transactionHash}-${handshake.blockNumber}`}
                                             handshake={handshake}
                                             onAccept={acceptHandshake}

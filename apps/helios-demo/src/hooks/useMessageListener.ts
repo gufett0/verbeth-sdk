@@ -1,12 +1,13 @@
-// Enhanced useMessageListener with improved error handling and HandshakeResponse support
+// Enhanced useMessageListener with verification using SDK functions
 import { useEffect, useCallback, useRef } from 'react';
-import { BrowserProvider, keccak256, toUtf8Bytes, AbiCoder } from 'ethers';
+import { BrowserProvider, keccak256, toUtf8Bytes, AbiCoder, Transaction } from 'ethers';
 import { useConversationManager } from './useConversationManager';
 import { 
   decodeHandshakePayload, 
   decryptHandshakeResponse,
   decryptMessage,
-  parseHandshakePayload 
+  parseHandshakePayload,
+  verifyHandshakeIdentity
 } from '@verbeth/sdk';
 
 interface MessageListenerProps {
@@ -25,6 +26,96 @@ const EVENT_SIGNATURES = {
 
 const LOGCHAIN_ADDR = '0xf9fe7E57459CC6c42791670FaD55c1F548AE51E8';
 
+// Helper function to serialize transaction for verification
+function serializeTransaction(tx: any): string {
+  try {
+    if (typeof tx === 'string') {
+      return tx; // Already serialized
+    }
+    
+    console.log('🔧 Serializing transaction:', {
+      type: tx.type,
+      to: tx.to,
+      value: tx.value?.toString(),
+      data: tx.data,
+      gasLimit: tx.gasLimit?.toString(),
+      nonce: tx.nonce,
+      chainId: tx.chainId,
+      hasSignature: !!tx.signature
+    });
+    
+    // For EIP-1559 transactions (type 2)
+    if (tx.type === 2) {
+      const cleanTx = {
+        type: 2,
+        to: tx.to,
+        value: tx.value || 0n,
+        data: tx.data || '0x',
+        gasLimit: tx.gasLimit,
+        maxFeePerGas: tx.maxFeePerGas,
+        maxPriorityFeePerGas: tx.maxPriorityFeePerGas,
+        nonce: tx.nonce,
+        chainId: tx.chainId,
+        accessList: tx.accessList || []
+      };
+      
+      // Create transaction without signature first
+      const unsignedTx = Transaction.from(cleanTx);
+      
+      // Add signature if available
+      if (tx.signature) {
+        unsignedTx.signature = tx.signature;
+      }
+      
+      return unsignedTx.serialized;
+    }
+    
+    // For legacy transactions (type 0)
+    else {
+      const cleanTx = {
+        type: 0,
+        to: tx.to,
+        value: tx.value || 0n,
+        data: tx.data || '0x',
+        gasLimit: tx.gasLimit,
+        gasPrice: tx.gasPrice,
+        nonce: tx.nonce,
+        chainId: tx.chainId
+      };
+      
+      // Create transaction without signature first
+      const unsignedTx = Transaction.from(cleanTx);
+      
+      // Add signature if available
+      if (tx.signature) {
+        unsignedTx.signature = tx.signature;
+      }
+      
+      return unsignedTx.serialized;
+    }
+  } catch (error) {
+    console.error('❌ Failed to serialize transaction:', error, {
+      type: typeof tx,
+      txType: tx.type,
+      hasSignature: !!tx.signature,
+      signature: tx.signature
+    });
+    return '';
+  }
+}
+
+// Helper function to convert hex string to regular string
+function hexToString(hexString: string): string {
+  try {
+    const bytes = new Uint8Array(
+      hexString.match(/.{1,2}/g)?.map(byte => parseInt(byte, 16)) || []
+    );
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return hexString;
+  }
+}
+
 export function useMessageListener({
   readProvider,
   userAddress,
@@ -32,7 +123,7 @@ export function useMessageListener({
   onIncomingHandshake,
   onIncomingHandshakeResponse
 }: MessageListenerProps) {
-  const { handleHandshakeResponse, updateConversation } = useConversationManager();
+  const { handleHandshakeResponse } = useConversationManager();
   const processedLogs = useRef(new Set<string>());
   const lastScannedBlock = useRef<number>(0);
 
@@ -48,73 +139,130 @@ export function useMessageListener({
 
       const eventSignature = topics[0];
       
+      // Fetch transaction data for verification with retry
+      let rawTxHex: string | null = null;
+      try {
+        console.log('🔍 Fetching transaction:', log.transactionHash);
+        
+        // First attempt
+        let transaction = await readProvider?.getTransaction(log.transactionHash);
+        
+        // If not found, wait and retry (Helios might need time to sync)
+        if (!transaction) {
+          console.log('🔄 Transaction not found, retrying in 6 seconds...');
+          await new Promise(resolve => setTimeout(resolve, 6000));
+          transaction = await readProvider?.getTransaction(log.transactionHash);
+        }
+        
+        // If still not found, try one more time with longer delay
+        if (!transaction) {
+          console.log('🔄 Transaction still not found, retrying in 15 seconds...');
+          await new Promise(resolve => setTimeout(resolve, 15000));
+          transaction = await readProvider?.getTransaction(log.transactionHash);
+        }
+        
+        if (transaction) {
+          console.log('📄 Transaction fetched:', {
+            hash: transaction.hash,
+            type: transaction.type,
+            hasSignature: !!transaction.signature,
+            to: transaction.to,
+            from: transaction.from
+          });
+          rawTxHex = serializeTransaction(transaction);
+          console.log('📦 Serialized transaction length:', rawTxHex?.length || 0);
+        } else {
+          console.warn('⚠️ Transaction not found after retries (Helios limitation):', log.transactionHash);
+        }
+      } catch (error) {
+        console.warn('⚠️ Could not fetch transaction for verification:', error);
+        // Continue processing but note that verification will be skipped
+      }
+
       if (eventSignature === EVENT_SIGNATURES.MessageSent) {
         console.log('📨 MessageSent detected:', log);
-        onIncomingMessage?.({
-          type: 'message',
-          sender: log.address,
-          data: log.data,
-          timestamp: Date.now(),
-          blockNumber: log.blockNumber
-        });
+        onIncomingMessage?.(log);
       }
       
       else if (eventSignature === EVENT_SIGNATURES.Handshake) {
         if (!userAddress) return;
         
-        const recipientHash = topics[1];
-        const expectedHash = calculateRecipientHash(userAddress);
+        console.log('🤝 Handshake detected:', log);
         
-        console.log('🤝 Handshake detected:', {
-          recipientHash,
-          expectedHash,
-          isForMe: recipientHash === expectedHash,
-          sender: topics[2],
-          block: log.blockNumber
-        });
-        
-        if (recipientHash === expectedHash) {
-          try {
-            // Use SDK functions to decode handshake
-            const abiCoder = new AbiCoder();
-            const decoded = abiCoder.decode(['bytes', 'bytes', 'bytes'], log.data);
-            const [identityPubKeyBytes, ephemeralPubKeyBytes, plaintextPayloadBytes] = decoded;
-            
-            // Convert hex to Uint8Array
-            const identityPubKey = hexToUint8Array(identityPubKeyBytes);
-            const ephemeralPubKey = hexToUint8Array(ephemeralPubKeyBytes);
-            const plaintextPayloadStr = hexToString(plaintextPayloadBytes);
-            
-            // Parse using SDK function
-            const handshakeContent = parseHandshakePayload(plaintextPayloadStr);
-            
-            // Clean sender address
-            const cleanSenderAddress = topics[2].replace(/^0x0+/, '0x');
-            
-            const handshakeWithParsedData = {
-              ...log,
-              type: 'handshake',
-              sender: cleanSenderAddress,
-              timestamp: Date.now(),
-              blockNumber: log.blockNumber,
-              transactionHash: log.transactionHash,
-              // Store structured data using SDK format
-              identityPubKey: Array.from(identityPubKey),
-              ephemeralPubKey: Array.from(ephemeralPubKey),
-              plaintextPayload: handshakeContent.plaintextPayload,
-              handshakeContent, // Full parsed content including identityProof if present
-              // Store raw data for reconstruction
-              rawData: {
-                identityPubKeyBytes,
-                ephemeralPubKeyBytes,
-                plaintextPayloadBytes
-              }
-            };
-            
-            onIncomingHandshake?.(handshakeWithParsedData);
-          } catch (error) {
-            console.error('Failed to parse handshake using SDK:', error);
+        try {
+          const recipientHash = topics[1];
+          const senderAddress = topics[2].replace(/^0x0+/, '0x');
+          
+          // ⚠️ IMPORTANT: Only process handshakes NOT sent by current user
+          if (senderAddress.toLowerCase() === userAddress.toLowerCase()) {
+            console.log('📤 Skipping handshake sent by current user:', senderAddress);
+            return;
           }
+          
+          // Check if this handshake is intended for current user
+          const expectedRecipientHash = keccak256(toUtf8Bytes(`contact:${userAddress.toLowerCase()}`));
+          if (recipientHash.toLowerCase() !== expectedRecipientHash.toLowerCase()) {
+            console.log('📭 Handshake not intended for current user, skipping');
+            return;
+          }
+          
+          console.log('📨 Processing incoming handshake from:', senderAddress, 'to:', userAddress);
+          
+          const abiCoder = new AbiCoder();
+          const [identityPubKeyBytes, ephemeralPubKeyBytes, plaintextPayloadBytes] = abiCoder.decode(
+            ['bytes', 'bytes', 'bytes'], 
+            log.data
+          );
+
+          // Create handshake event object for verification
+          const handshakeEvent = {
+            recipientHash,
+            sender: senderAddress,
+            identityPubKey: identityPubKeyBytes,
+            ephemeralPubKey: ephemeralPubKeyBytes,
+            plaintextPayload: hexToString(plaintextPayloadBytes)
+          };
+
+          // Verify handshake identity if we have transaction data
+          if (rawTxHex && readProvider) {
+            console.log('🔐 Verifying handshake identity...');
+            const isVerified = await verifyHandshakeIdentity(
+              handshakeEvent,
+              rawTxHex,
+              readProvider
+            );
+
+            if (!isVerified) {
+              console.warn('⚠️ Handshake verification failed, rejecting handshake from:', senderAddress);
+              return; // Don't process unverified handshake
+            }
+            console.log('✅ Handshake verification successful');
+          } else {
+            console.warn('⚠️ Skipping handshake verification - Helios light client limitation (cannot fetch transaction data)');
+            console.log('ℹ️ For production, consider using a full node or implementing alternative verification');
+          }
+
+          // Parse the handshake payload using SDK
+          const parsedPayload = parseHandshakePayload(handshakeEvent.plaintextPayload);
+          
+          const handshakeWithParsedData = {
+            type: 'handshake',
+            recipientHash,
+            sender: senderAddress,
+            identityPubKey: identityPubKeyBytes,
+            ephemeralPubKey: ephemeralPubKeyBytes,
+            plaintextPayload: handshakeEvent.plaintextPayload,
+            parsedPayload,
+            timestamp: Date.now(),
+            blockNumber: log.blockNumber,
+            transactionHash: log.transactionHash,
+            rawTxHex, // Include for downstream verification if needed
+            verified: !!rawTxHex // Mark if verification was performed
+          };
+
+          onIncomingHandshake?.(handshakeWithParsedData);
+        } catch (error) {
+          console.error('Failed to parse handshake using SDK:', error);
         }
       }
       
@@ -147,19 +295,21 @@ export function useMessageListener({
             timestamp: Date.now(),
             blockNumber: log.blockNumber,
             transactionHash: log.transactionHash,
+            rawTxHex, // Include for verification
             rawData: {
               ciphertextBytes
             }
           };
           
-          // Update conversation state to established if this response is for us
-          // Note: We need to check if the original handshake was sent by us
-          updateConversation(responderAddress, {
-            status: 'established',
-            lastMessageTime: Math.floor(Date.now() / 1000)
-          });
-          
+          // Notify about the response - let the parent component handle conversation updates
           onIncomingHandshakeResponse?.(handshakeResponseData);
+          
+          // Process with conversation manager (will handle verification internally)
+          // Note: processHandshakeResponse needs walletClient and userAddress, 
+          // but we don't have them in this hook. The actual processing should be 
+          // called from the component level where these are available.
+          // For now, we just notify about the response.
+          // await handleHandshakeResponse(handshakeResponseData);
         } catch (error) {
           console.error('Failed to parse handshake response:', error);
         }
@@ -168,7 +318,7 @@ export function useMessageListener({
     } catch (error) {
       console.error('Error processing log:', error);
     }
-  }, [onIncomingMessage, onIncomingHandshake, onIncomingHandshakeResponse, handleHandshakeResponse, userAddress, updateConversation]);
+  }, [onIncomingMessage, onIncomingHandshake, onIncomingHandshakeResponse, handleHandshakeResponse, userAddress, readProvider]);
 
   // Scan historical logs with improved error handling
   const scanHistoricalLogs = useCallback(async () => {
@@ -264,35 +414,35 @@ export function useMessageListener({
           if (!isListening) return;
           
           try {
-            // Only scan blocks we haven't seen yet
-            if (blockNumber <= lastScannedBlock.current) return;
+            // Scan new logs since last scanned block
+            const fromBlock = Math.max(lastScannedBlock.current + 1, blockNumber - 5);
             
-            const filter = {
-              address: LOGCHAIN_ADDR,
-              fromBlock: blockNumber,
-              toBlock: blockNumber
-            };
-            
-            const logs = await readProvider.getLogs(filter);
-            
-            if (logs.length > 0) {
-              console.log(`🆕 Found ${logs.length} new logs in block ${blockNumber}`);
+            if (fromBlock <= blockNumber) {
+              const filter = {
+                address: LOGCHAIN_ADDR,
+                fromBlock,
+                toBlock: blockNumber,
+                topics: [
+                  [EVENT_SIGNATURES.MessageSent, EVENT_SIGNATURES.Handshake, EVENT_SIGNATURES.HandshakeResponse]
+                ]
+              };
+              
+              const newLogs = await readProvider.getLogs(filter);
+              
+              for (const log of newLogs) {
+                await handleNewLog(log);
+              }
+              
+              lastScannedBlock.current = blockNumber;
             }
-            
-            for (const log of logs) {
-              await handleNewLog(log);
-            }
-            
-            lastScannedBlock.current = blockNumber;
           } catch (error) {
-            console.error('Error fetching logs for block:', blockNumber, error);
-            // Don't fail completely, just log and continue
+            console.error('Error processing new block logs:', error);
           }
         });
-        
-        console.log('✅ Started listening for VerbEth messages');
+
+        console.log('👂 Started listening for new events...');
       } catch (error) {
-        console.error('❌ Failed to start message listener:', error);
+        console.error('Error starting event listener:', error);
       }
     };
 
@@ -300,41 +450,14 @@ export function useMessageListener({
 
     return () => {
       isListening = false;
-      readProvider.removeAllListeners('block');
-      processedLogs.current.clear();
-      console.log('🛑 Stopped listening for VerbEth messages');
+      try {
+        readProvider.removeAllListeners('block');
+        console.log('🛑 Stopped listening for events');
+      } catch (error) {
+        console.error('Error cleaning up event listeners:', error);
+      }
     };
-  }, [readProvider, userAddress, handleNewLog, scanHistoricalLogs]);
-}
+  }, [readProvider, userAddress, scanHistoricalLogs, handleNewLog]);
 
-export function calculateRecipientHash(address: string): string {
-  return keccak256(toUtf8Bytes('contact:' + address.toLowerCase()));
-}
-
-// Helper functions to convert hex to proper types using SDK patterns
-function hexToUint8Array(hexValue: string): Uint8Array {
-  if (typeof hexValue === 'string' && hexValue.startsWith('0x')) {
-    const hexString = hexValue.slice(2);
-    const matchResult = hexString.match(/.{2}/g);
-    if (!matchResult) {
-      throw new Error("Failed to parse hex string into bytes");
-    }
-    return new Uint8Array(matchResult.map(byte => parseInt(byte, 16)));
-  } else {
-    throw new Error(`Expected hex string, got: ${typeof hexValue}`);
-  }
-}
-
-function hexToString(hexValue: string): string {
-  if (typeof hexValue === 'string' && hexValue.startsWith('0x')) {
-    const hexString = hexValue.slice(2);
-    const matchResult = hexString.match(/.{2}/g);
-    if (!matchResult) {
-      throw new Error("Failed to parse hex string into bytes");
-    }
-    const bytes = new Uint8Array(matchResult.map(byte => parseInt(byte, 16)));
-    return new TextDecoder().decode(bytes);
-  } else {
-    throw new Error(`Expected hex string, got: ${typeof hexValue}`);
-  }
+  return null;
 }

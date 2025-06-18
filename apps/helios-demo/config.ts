@@ -68,6 +68,6 @@ export const config = createConfig({
   transports: {
     [mainnet.id]: http(),
     [base.id]: http('https://base-rpc.publicnode.com'),
-    [baseSepolia.id]: http(),
+    [baseSepolia.id]: http('https://base-sepolia-rpc.publicnode.com'),
   },
 })

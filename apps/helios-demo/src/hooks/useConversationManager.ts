@@ -1,21 +1,36 @@
-// apps/helios-demo/src/hooks/useConversationManager.ts
+// Enhanced useConversationManager with persistent conversation state and message history
 import { useState, useCallback, useEffect } from 'react';
 import nacl from 'tweetnacl';
 import { 
   initiateHandshake, 
   respondToHandshake, 
-  sendEncryptedMessage 
+  sendEncryptedMessage,
+  decryptHandshakeResponse 
 } from '@verbeth/sdk';
 import type { LogChainV1 } from '@verbeth/contracts/typechain-types';
 import { WalletClient } from 'viem';
 import { deriveIdentityKeyFromAddress } from '../utils/keyDerivation';
 
+interface ConversationMessage {
+  id: string;
+  content: string;
+  timestamp: number;
+  sender: string;
+  type: 'outgoing' | 'incoming' | 'handshake' | 'system';
+  status?: 'sending' | 'sent' | 'failed';
+}
 
 interface ConversationState {
   recipientAddress: string;
   recipientPubKey?: Uint8Array;
   status: 'none' | 'initiated' | 'established';
   lastMessageTime?: number;
+  messages: ConversationMessage[];
+  // Store ephemeral keys for decryption
+  ephemeralKeys?: {
+    ourEphemeralPrivateKey?: Uint8Array;
+    theirEphemeralPublicKey?: Uint8Array;
+  };
 }
 
 interface MessageOptions {
@@ -31,7 +46,8 @@ interface MessageOptions {
 // localStorage keys
 const STORAGE_KEYS = {
   RECIPIENTS: 'verbeth_recipients',
-  CONVERSATIONS: 'verbeth_conversations'
+  CONVERSATIONS: 'verbeth_conversations_v2', // Bumped version for new format
+  PENDING_HANDSHAKES: 'verbeth_pending_handshakes'
 } as const;
 
 // Helper functions for localStorage operations
@@ -60,13 +76,14 @@ const loadConversationsFromStorage = (): Map<string, ConversationState> => {
       const conversationsData = JSON.parse(stored);
       const conversationsMap = new Map<string, ConversationState>();
       
-      // Reconstruct conversations but reset ephemeral data (recipientPubKey)
-      // since it cannot be safely serialized/deserialized
+      // Reconstruct conversations with message history
       Object.entries(conversationsData).forEach(([address, state]: [string, any]) => {
         conversationsMap.set(address, {
           recipientAddress: address,
-          status: state.status === 'established' ? 'none' : state.status, // Reset established connections
+          status: state.status || 'none',
           lastMessageTime: state.lastMessageTime,
+          messages: state.messages || [],
+          // Don't restore ephemeral keys for security
           // Don't restore recipientPubKey as it's a Uint8Array and needs fresh exchange
         });
       });
@@ -83,12 +100,13 @@ const saveConversationsToStorage = (conversations: Map<string, ConversationState
   try {
     const conversationsData: Record<string, any> = {};
     conversations.forEach((state, address) => {
-      // Store minimal conversation data (exclude recipientPubKey)
+      // Store conversation data with message history
       conversationsData[address] = {
         recipientAddress: state.recipientAddress,
         status: state.status,
         lastMessageTime: state.lastMessageTime,
-        // Note: recipientPubKey intentionally excluded as it needs fresh exchange
+        messages: state.messages,
+        // Note: recipientPubKey and ephemeralKeys intentionally excluded for security
       };
     });
     localStorage.setItem(STORAGE_KEYS.CONVERSATIONS, JSON.stringify(conversationsData));
@@ -123,7 +141,8 @@ export function useConversationManager() {
           if (!newMap.has(address)) {
             newMap.set(address, {
               recipientAddress: address,
-              status: 'none'
+              status: 'none',
+              messages: []
             });
           }
         });
@@ -142,7 +161,8 @@ export function useConversationManager() {
     const existing = conversations.get(normalizedAddress);
     return existing || {
       recipientAddress: normalizedAddress,
-      status: 'none'
+      status: 'none',
+      messages: []
     };
   }, [conversations]);
 
@@ -156,9 +176,55 @@ export function useConversationManager() {
       const newMap = new Map(prev);
       const existing = newMap.get(normalizedAddress) || { 
         recipientAddress: normalizedAddress, 
-        status: 'none' as const 
+        status: 'none' as const,
+        messages: [] 
       };
       newMap.set(normalizedAddress, { ...existing, ...updates });
+      return newMap;
+    });
+  }, []);
+
+  const addMessage = useCallback((recipientAddress: string, message: ConversationMessage) => {
+    const normalizedAddress = recipientAddress.toLowerCase();
+    
+    setConversations(prev => {
+      const newMap = new Map(prev);
+      const existing = newMap.get(normalizedAddress) || {
+        recipientAddress: normalizedAddress,
+        status: 'none' as const,
+        messages: []
+      };
+      
+      const updatedMessages = [...existing.messages, message];
+      
+      newMap.set(normalizedAddress, {
+        ...existing,
+        messages: updatedMessages,
+        lastMessageTime: message.timestamp
+      });
+      
+      return newMap;
+    });
+  }, []);
+
+  const updateMessageStatus = useCallback((recipientAddress: string, messageId: string, status: 'sending' | 'sent' | 'failed') => {
+    const normalizedAddress = recipientAddress.toLowerCase();
+    
+    setConversations(prev => {
+      const newMap = new Map(prev);
+      const existing = newMap.get(normalizedAddress);
+      
+      if (existing) {
+        const updatedMessages = existing.messages.map(msg => 
+          msg.id === messageId ? { ...msg, status } : msg
+        );
+        
+        newMap.set(normalizedAddress, {
+          ...existing,
+          messages: updatedMessages
+        });
+      }
+      
       return newMap;
     });
   }, []);
@@ -180,7 +246,8 @@ export function useConversationManager() {
       if (!newMap.has(normalizedAddress)) {
         newMap.set(normalizedAddress, {
           recipientAddress: normalizedAddress,
-          status: 'none'
+          status: 'none',
+          messages: []
         });
       }
       return newMap;
@@ -223,123 +290,228 @@ export function useConversationManager() {
   }, []);
 
   const sendMessage = useCallback(async (options: MessageOptions) => {
-  const { contract, recipientAddress, message, senderAddress, senderSignKeyPair, walletClient, topic } = options;
-  const conversation = getConversation(recipientAddress);
-  const timestamp = Math.floor(Date.now() / 1000);
-  const defaultTopic = topic || "0x" + "00".repeat(32);
+    const { contract, recipientAddress, message, senderAddress, senderSignKeyPair, walletClient, topic } = options;
+    const conversation = getConversation(recipientAddress);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const defaultTopic = topic || "0x" + "00".repeat(32);
+    const messageId = `msg_${timestamp}_${Math.random().toString(36).substr(2, 9)}`;
 
-  try {
-    switch (conversation.status) {
-      case 'none':
-        // First message - initiate handshake
-        const identityPubKey = await deriveIdentityKeyFromAddress(walletClient, senderAddress); // ✅ Sostituita chiave casuale
-        const ephemeralKeyPair = nacl.box.keyPair();
-        
-        await initiateHandshake({
-          contract,
-          recipientAddress,
-          identityPubKey,
-          ephemeralPubKey: ephemeralKeyPair.publicKey,
-          plaintextPayload: message
-        });
+    // Add message to conversation immediately with 'sending' status
+    const newMessage: ConversationMessage = {
+      id: messageId,
+      content: message,
+      timestamp,
+      sender: senderAddress,
+      type: 'outgoing',
+      status: 'sending'
+    };
 
-        updateConversation(recipientAddress, { 
-          status: 'initiated',
-          lastMessageTime: timestamp
-        });
-        
-        return { type: 'handshake_initiated', success: true };
+    addMessage(recipientAddress, newMessage);
 
-      case 'established':
-        // Ongoing conversation - use regular encrypted message
-        if (!conversation.recipientPubKey) {
-          throw new Error('Recipient public key not available');
-        }
+    try {
+      switch (conversation.status) {
+        case 'none':
+          // First message - initiate handshake
+          const identityPubKey = await deriveIdentityKeyFromAddress(walletClient, senderAddress);
+          const ephemeralKeyPair = nacl.box.keyPair();
+          
+          await initiateHandshake({
+            contract,
+            recipientAddress,
+            identityPubKey,
+            ephemeralPubKey: ephemeralKeyPair.publicKey,
+            plaintextPayload: message
+          });
 
-        await sendEncryptedMessage({
-          contract,
-          topic: defaultTopic,
-          message,
-          recipientPubKey: conversation.recipientPubKey,
-          senderAddress,
-          senderSignKeyPair,
-          timestamp
-        });
+          updateConversation(recipientAddress, { 
+            status: 'initiated',
+            lastMessageTime: timestamp,
+            ephemeralKeys: {
+              ourEphemeralPrivateKey: ephemeralKeyPair.secretKey
+            }
+          });
 
-        updateConversation(recipientAddress, { 
-          lastMessageTime: timestamp
-        });
+          // Update message type to handshake
+          setConversations(prev => {
+            const newMap = new Map(prev);
+            const existing = newMap.get(recipientAddress.toLowerCase());
+            if (existing) {
+              const updatedMessages = existing.messages.map(msg =>
+                msg.id === messageId ? { ...msg, type: 'handshake' as const, status: 'sent' as const } : msg
+              );
+              newMap.set(recipientAddress.toLowerCase(), { ...existing, messages: updatedMessages });
+            }
+            return newMap;
+          });
+          
+          return { type: 'handshake_initiated', success: true };
 
-        return { type: 'message_sent', success: true };
+        case 'established':
+          // Ongoing conversation - use regular encrypted message
+          if (!conversation.recipientPubKey) {
+            throw new Error('Recipient public key not available');
+          }
 
-      case 'initiated':
-        // Waiting for handshake response - could resend or wait
-        throw new Error('Handshake pending. Wait for recipient response before sending more messages.');
+          await sendEncryptedMessage({
+            contract,
+            topic: defaultTopic,
+            message,
+            recipientPubKey: conversation.recipientPubKey,
+            senderAddress,
+            senderSignKeyPair,
+            timestamp
+          });
 
-      default:
-        throw new Error('Unknown conversation status');
+          updateConversation(recipientAddress, { 
+            lastMessageTime: timestamp
+          });
+
+          updateMessageStatus(recipientAddress, messageId, 'sent');
+
+          return { type: 'message_sent', success: true };
+
+        case 'initiated':
+          // Waiting for handshake response - could resend or wait
+          updateMessageStatus(recipientAddress, messageId, 'failed');
+          throw new Error('Handshake pending. Wait for recipient response before sending more messages.');
+
+        default:
+          updateMessageStatus(recipientAddress, messageId, 'failed');
+          throw new Error('Unknown conversation status');
+      }
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      updateMessageStatus(recipientAddress, messageId, 'failed');
+      throw error;
     }
-  } catch (error) {
-    console.error('Failed to send message:', error);
-    throw error;
-  }
-}, [getConversation, updateConversation]);
+  }, [getConversation, updateConversation, addMessage, updateMessageStatus]);
 
   const handleHandshakeResponse = useCallback(async (
     recipientAddress: string,
-    recipientPubKey: Uint8Array
+    recipientPubKey: Uint8Array,
+    responseMessage?: string
   ) => {
+    const timestamp = Math.floor(Date.now() / 1000);
+    
     updateConversation(recipientAddress, {
       status: 'established',
-      recipientPubKey
+      recipientPubKey,
+      lastMessageTime: timestamp
     });
-  }, [updateConversation]);
+
+    // Add system message about connection establishment
+    if (responseMessage) {
+      const systemMessage: ConversationMessage = {
+        id: `sys_${timestamp}_${Math.random().toString(36).substr(2, 9)}`,
+        content: `Connection established. Response: "${responseMessage}"`,
+        timestamp,
+        sender: 'system',
+        type: 'system'
+      };
+      addMessage(recipientAddress, systemMessage);
+    }
+  }, [updateConversation, addMessage]);
+
+  const processHandshakeResponse = useCallback(async (
+    responseData: any,
+    walletClient: WalletClient,
+    userAddress: string
+  ) => {
+    try {
+      // Find the conversation that initiated the handshake
+      const conversations_array = Array.from(conversations.values());
+      const initiatedConversation = conversations_array.find(conv => 
+        conv.status === 'initiated' && conv.ephemeralKeys?.ourEphemeralPrivateKey
+      );
+
+      if (!initiatedConversation || !initiatedConversation.ephemeralKeys?.ourEphemeralPrivateKey) {
+        console.warn('No matching initiated conversation found for handshake response');
+        return false;
+      }
+
+      // Decrypt the handshake response using SDK
+      const decryptedResponse = decryptHandshakeResponse(
+        responseData.ciphertextJson,
+        initiatedConversation.ephemeralKeys.ourEphemeralPrivateKey
+      );
+
+      if (!decryptedResponse) {
+        console.error('Failed to decrypt handshake response');
+        return false;
+      }
+
+      console.log('Successfully decrypted handshake response:', decryptedResponse);
+
+      // Update conversation with recipient's public key
+      await handleHandshakeResponse(
+        responseData.responder,
+        decryptedResponse.identityPubKey,
+        decryptedResponse.note
+      );
+
+      return true;
+    } catch (error) {
+      console.error('Failed to process handshake response:', error);
+      return false;
+    }
+  }, [conversations, handleHandshakeResponse]);
 
   const respondToIncomingHandshake = useCallback(async (options: {
-  contract: LogChainV1;
-  inResponseTo: string;
-  initiatorAddress: string;
-  initiatorPubKey: Uint8Array;
-  responseMessage?: string;
-  walletClient: WalletClient; 
-  responderAddress: string; 
-}) => {
-  const { 
-    contract, 
-    inResponseTo, 
-    initiatorAddress, 
-    initiatorPubKey, 
-    responseMessage,
-    walletClient,
-    responderAddress
-  } = options;
+    contract: LogChainV1;
+    inResponseTo: string;
+    initiatorAddress: string;
+    initiatorPubKey: Uint8Array;
+    responseMessage?: string;
+    walletClient: WalletClient; 
+    responderAddress: string; 
+  }) => {
+    const { 
+      contract, 
+      inResponseTo, 
+      initiatorAddress, 
+      initiatorPubKey, 
+      responseMessage,
+      walletClient,
+      responderAddress
+    } = options;
 
-  try {
-    const responderIdentityPubKey = await deriveIdentityKeyFromAddress(walletClient, responderAddress); 
-    const responderEphemeralKeyPair = nacl.box.keyPair();
+    try {
+      const responderIdentityPubKey = await deriveIdentityKeyFromAddress(walletClient, responderAddress); 
+      const responderEphemeralKeyPair = nacl.box.keyPair();
 
-    await respondToHandshake({
-      contract,
-      inResponseTo,
-      initiatorPubKey,
-      responderIdentityPubKey,
-      responderEphemeralKeyPair,
-      note: responseMessage
-    });
+      await respondToHandshake({
+        contract,
+        inResponseTo,
+        initiatorPubKey,
+        responderIdentityPubKey,
+        responderEphemeralKeyPair,
+        note: responseMessage
+      });
 
-    // Update conversation state
-    updateConversation(initiatorAddress, {
-      status: 'established',
-      recipientPubKey: initiatorPubKey,
-      lastMessageTime: Math.floor(Date.now() / 1000)
-    });
+      // Update conversation state
+      const timestamp = Math.floor(Date.now() / 1000);
+      updateConversation(initiatorAddress, {
+        status: 'established',
+        recipientPubKey: initiatorPubKey,
+        lastMessageTime: timestamp
+      });
 
-    return { success: true };
-  } catch (error) {
-    console.error('Failed to respond to handshake:', error);
-    throw error;
-  }
-}, [updateConversation]);
+      // Add system message about accepting handshake
+      const systemMessage: ConversationMessage = {
+        id: `sys_${timestamp}_${Math.random().toString(36).substr(2, 9)}`,
+        content: `Handshake accepted. Response: "${responseMessage || 'Connection established'}"`,
+        timestamp,
+        sender: 'system',
+        type: 'system'
+      };
+      addMessage(initiatorAddress, systemMessage);
+
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to respond to handshake:', error);
+      throw error;
+    }
+  }, [updateConversation, addMessage]);
 
   return {
     conversations: Array.from(conversations.values()),
@@ -350,6 +522,9 @@ export function useConversationManager() {
     getStoredRecipients,
     sendMessage,
     handleHandshakeResponse,
-    respondToIncomingHandshake
+    respondToIncomingHandshake,
+    addMessage,
+    updateMessageStatus,
+    processHandshakeResponse
   };
 }

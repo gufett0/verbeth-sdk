@@ -1,13 +1,20 @@
-// Enhanced useMessageListener with improved error handling
+// Enhanced useMessageListener with improved error handling and HandshakeResponse support
 import { useEffect, useCallback, useRef } from 'react';
-import { BrowserProvider, keccak256, toUtf8Bytes } from 'ethers';
+import { BrowserProvider, keccak256, toUtf8Bytes, AbiCoder } from 'ethers';
 import { useConversationManager } from './useConversationManager';
+import { 
+  decodeHandshakePayload, 
+  decryptHandshakeResponse,
+  decryptMessage,
+  parseHandshakePayload 
+} from '@verbeth/sdk';
 
 interface MessageListenerProps {
   readProvider: BrowserProvider | null;
   userAddress: string | null;
   onIncomingMessage?: (message: any) => void;
   onIncomingHandshake?: (handshake: any) => void;
+  onIncomingHandshakeResponse?: (response: any) => void;
 }
 
 const EVENT_SIGNATURES = {
@@ -22,9 +29,10 @@ export function useMessageListener({
   readProvider,
   userAddress,
   onIncomingMessage,
-  onIncomingHandshake
+  onIncomingHandshake,
+  onIncomingHandshakeResponse
 }: MessageListenerProps) {
-  const { handleHandshakeResponse } = useConversationManager();
+  const { handleHandshakeResponse, updateConversation } = useConversationManager();
   const processedLogs = useRef(new Set<string>());
   const lastScannedBlock = useRef<number>(0);
 
@@ -66,28 +74,101 @@ export function useMessageListener({
         });
         
         if (recipientHash === expectedHash) {
-          onIncomingHandshake?.({
-            type: 'handshake',
-            sender: topics[2],
-            data: log.data,
-            timestamp: Date.now(),
-            recipientHash,
-            blockNumber: log.blockNumber,
-            transactionHash: log.transactionHash
-          });
+          try {
+            // Use SDK functions to decode handshake
+            const abiCoder = new AbiCoder();
+            const decoded = abiCoder.decode(['bytes', 'bytes', 'bytes'], log.data);
+            const [identityPubKeyBytes, ephemeralPubKeyBytes, plaintextPayloadBytes] = decoded;
+            
+            // Convert hex to Uint8Array
+            const identityPubKey = hexToUint8Array(identityPubKeyBytes);
+            const ephemeralPubKey = hexToUint8Array(ephemeralPubKeyBytes);
+            const plaintextPayloadStr = hexToString(plaintextPayloadBytes);
+            
+            // Parse using SDK function
+            const handshakeContent = parseHandshakePayload(plaintextPayloadStr);
+            
+            // Clean sender address
+            const cleanSenderAddress = topics[2].replace(/^0x0+/, '0x');
+            
+            const handshakeWithParsedData = {
+              ...log,
+              type: 'handshake',
+              sender: cleanSenderAddress,
+              timestamp: Date.now(),
+              blockNumber: log.blockNumber,
+              transactionHash: log.transactionHash,
+              // Store structured data using SDK format
+              identityPubKey: Array.from(identityPubKey),
+              ephemeralPubKey: Array.from(ephemeralPubKey),
+              plaintextPayload: handshakeContent.plaintextPayload,
+              handshakeContent, // Full parsed content including identityProof if present
+              // Store raw data for reconstruction
+              rawData: {
+                identityPubKeyBytes,
+                ephemeralPubKeyBytes,
+                plaintextPayloadBytes
+              }
+            };
+            
+            onIncomingHandshake?.(handshakeWithParsedData);
+          } catch (error) {
+            console.error('Failed to parse handshake using SDK:', error);
+          }
         }
       }
       
       else if (eventSignature === EVENT_SIGNATURES.HandshakeResponse) {
+        if (!userAddress) return;
+        
         console.log('🔄 HandshakeResponse detected:', log);
-        const inResponseTo = topics[1];
-        // Handle response logic here
+        
+        try {
+          const abiCoder = new AbiCoder();
+          const decoded = abiCoder.decode(['bytes'], log.data);
+          const [ciphertextBytes] = decoded;
+          
+          // Convert to string for SDK decryption
+          const ciphertextJson = hexToString(ciphertextBytes);
+          const inResponseTo = topics[1]; // Transaction hash this responds to
+          const responderAddress = topics[2].replace(/^0x0+/, '0x');
+          
+          console.log('HandshakeResponse details:', {
+            inResponseTo,
+            responderAddress,
+            ciphertextLength: ciphertextJson.length
+          });
+          
+          const handshakeResponseData = {
+            type: 'handshake_response',
+            inResponseTo,
+            responder: responderAddress,
+            ciphertextJson,
+            timestamp: Date.now(),
+            blockNumber: log.blockNumber,
+            transactionHash: log.transactionHash,
+            rawData: {
+              ciphertextBytes
+            }
+          };
+          
+          // Update conversation state to established if this response is for us
+          // Note: We need to check if the original handshake was sent by us
+          updateConversation(responderAddress, {
+            status: 'established',
+            lastMessageTime: Math.floor(Date.now() / 1000)
+          });
+          
+          onIncomingHandshakeResponse?.(handshakeResponseData);
+        } catch (error) {
+          console.error('Failed to parse handshake response:', error);
+        }
       }
       
     } catch (error) {
       console.error('Error processing log:', error);
     }
-  }, [onIncomingMessage, onIncomingHandshake, handleHandshakeResponse, userAddress]);
+  }, [onIncomingMessage, onIncomingHandshake, onIncomingHandshakeResponse, handleHandshakeResponse, userAddress, updateConversation]);
 
   // Scan historical logs with improved error handling
   const scanHistoricalLogs = useCallback(async () => {
@@ -228,4 +309,32 @@ export function useMessageListener({
 
 export function calculateRecipientHash(address: string): string {
   return keccak256(toUtf8Bytes('contact:' + address.toLowerCase()));
+}
+
+// Helper functions to convert hex to proper types using SDK patterns
+function hexToUint8Array(hexValue: string): Uint8Array {
+  if (typeof hexValue === 'string' && hexValue.startsWith('0x')) {
+    const hexString = hexValue.slice(2);
+    const matchResult = hexString.match(/.{2}/g);
+    if (!matchResult) {
+      throw new Error("Failed to parse hex string into bytes");
+    }
+    return new Uint8Array(matchResult.map(byte => parseInt(byte, 16)));
+  } else {
+    throw new Error(`Expected hex string, got: ${typeof hexValue}`);
+  }
+}
+
+function hexToString(hexValue: string): string {
+  if (typeof hexValue === 'string' && hexValue.startsWith('0x')) {
+    const hexString = hexValue.slice(2);
+    const matchResult = hexString.match(/.{2}/g);
+    if (!matchResult) {
+      throw new Error("Failed to parse hex string into bytes");
+    }
+    const bytes = new Uint8Array(matchResult.map(byte => parseInt(byte, 16)));
+    return new TextDecoder().decode(bytes);
+  } else {
+    throw new Error(`Expected hex string, got: ${typeof hexValue}`);
+  }
 }

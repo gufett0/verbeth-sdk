@@ -1,13 +1,18 @@
-// apps/helios-demo/src/components/ConversationList.tsx
+// Enhanced ConversationList with conversation opening capability
 import { useState } from 'react';
 import { useConversationManager } from '../hooks/useConversationManager';
 
 interface ConversationListProps {
   selectedRecipient: string;
   onRecipientSelect: (recipient: string) => void;
+  onOpenConversation?: (recipient: string) => void; // NEW: for opening conversation view
 }
 
-export function ConversationList({ selectedRecipient, onRecipientSelect }: ConversationListProps) {
+export function ConversationList({ 
+  selectedRecipient, 
+  onRecipientSelect,
+  onOpenConversation 
+}: ConversationListProps) {
   const [newRecipient, setNewRecipient] = useState('');
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const { 
@@ -55,6 +60,14 @@ export function ConversationList({ selectedRecipient, onRecipientSelect }: Conve
     }
   };
 
+  const handleConversationClick = (recipientAddress: string) => {
+    onRecipientSelect(recipientAddress);
+    // Open conversation view if callback provided
+    if (onOpenConversation) {
+      onOpenConversation(recipientAddress);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'established':
@@ -79,6 +92,14 @@ export function ConversationList({ selectedRecipient, onRecipientSelect }: Conve
 
   const formatAddress = (address: string) => {
     return `${address.slice(0, 6)}...${address.slice(-4)}`;
+  };
+
+  const getLastMessage = (conversation: any) => {
+    if (!conversation.messages || conversation.messages.length === 0) {
+      return null;
+    }
+    const lastMessage = conversation.messages[conversation.messages.length - 1];
+    return lastMessage;
   };
 
   const storedRecipients = getStoredRecipients();
@@ -156,49 +177,98 @@ export function ConversationList({ selectedRecipient, onRecipientSelect }: Conve
           </div>
         )}
         
-        {conversations.map((conversation: any) => (
-          <div
-            key={conversation.recipientAddress}
-            onClick={() => onRecipientSelect(conversation.recipientAddress)}
-            className={`
-              relative group p-3 border rounded-lg cursor-pointer transition-all duration-200
-              hover:border-gray-300 hover:shadow-sm
-              ${selectedRecipient === conversation.recipientAddress 
-                ? 'border-blue-500 bg-blue-50 shadow-sm' 
-                : 'border-gray-200 hover:bg-gray-50'
-              }
-            `}
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-mono text-sm font-medium text-gray-900 truncate">
-                    {formatAddress(conversation.recipientAddress)}
-                  </span>
-                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(conversation.status)}`}>
-                    {getStatusText(conversation.status)}
-                  </span>
+        {conversations.map((conversation: any) => {
+          const lastMessage = getLastMessage(conversation);
+          const hasUnreadMessages = lastMessage && lastMessage.type === 'incoming';
+          
+          return (
+            <div
+              key={conversation.recipientAddress}
+              onClick={() => handleConversationClick(conversation.recipientAddress)}
+              className={`
+                relative group p-3 border rounded-lg cursor-pointer transition-all duration-200
+                hover:border-gray-300 hover:shadow-sm
+                ${selectedRecipient === conversation.recipientAddress 
+                  ? 'border-blue-500 bg-blue-50 shadow-sm' 
+                  : 'border-gray-200 hover:bg-gray-50'
+                }
+                ${hasUnreadMessages ? 'bg-blue-25 border-blue-200' : ''}
+              `}
+            >
+              <div className="flex items-start justify-between">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-mono text-sm font-medium text-gray-900 truncate">
+                      {formatAddress(conversation.recipientAddress)}
+                    </span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${getStatusColor(conversation.status)}`}>
+                      {getStatusText(conversation.status)}
+                    </span>
+                    {hasUnreadMessages && (
+                      <span className="inline-flex items-center justify-center w-2 h-2 bg-blue-600 rounded-full"></span>
+                    )}
+                  </div>
+                  
+                  {/* Last message preview */}
+                  {lastMessage && (
+                    <div className="mb-1">
+                      <p className="text-xs text-gray-600 truncate">
+                        {lastMessage.type === 'system' ? (
+                          <span className="italic">System: {lastMessage.content}</span>
+                        ) : lastMessage.type === 'handshake' ? (
+                          <span className="text-yellow-600">🤝 Handshake: {lastMessage.content}</span>
+                        ) : lastMessage.type === 'outgoing' ? (
+                          <span>You: {lastMessage.content}</span>
+                        ) : (
+                          <span className="font-medium">{lastMessage.content}</span>
+                        )}
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Message count */}
+                  {conversation.messages && conversation.messages.length > 0 && (
+                    <p className="text-xs text-gray-500">
+                      {conversation.messages.length} message{conversation.messages.length !== 1 ? 's' : ''}
+                      {conversation.lastMessageTime && (
+                        <> • {new Date(conversation.lastMessageTime * 1000).toLocaleDateString()}</>
+                      )}
+                    </p>
+                  )}
                 </div>
-                {conversation.lastMessageTime && (
-                  <p className="text-xs text-gray-500">
-                    Last activity: {new Date(conversation.lastMessageTime * 1000).toLocaleString()}
-                  </p>
-                )}
+                
+                {/* Remove button */}
+                <button
+                  onClick={(e) => handleRemoveRecipient(conversation.recipientAddress, e)}
+                  className="opacity-0 group-hover:opacity-100 ml-2 p-1 text-gray-400 hover:text-red-600 transition-all duration-200"
+                  title="Remove recipient"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                  </svg>
+                </button>
               </div>
               
-              {/* Remove button */}
-              <button
-                onClick={(e) => handleRemoveRecipient(conversation.recipientAddress, e)}
-                className="opacity-0 group-hover:opacity-100 ml-2 p-1 text-gray-400 hover:text-red-600 transition-all duration-200"
-                title="Remove recipient"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-              </button>
+              {/* Open conversation button */}
+              {onOpenConversation && (
+                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenConversation(conversation.recipientAddress);
+                    }}
+                    className="p-1 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50 transition-colors"
+                    title="Open conversation"
+                  >
+                    <svg className="w-3 h-3 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                    </svg>
+                  </button>
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Quick stats */}

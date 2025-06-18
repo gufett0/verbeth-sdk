@@ -7,11 +7,17 @@ import { Contract, BrowserProvider, AbiCoder } from "ethers";
 import { useHelios } from "./helios";
 import { MessageInput } from "./components/MessageInput";
 import { ConversationList } from "./components/ConversationList";
+import { ConversationView } from "./components/ConversationView";
 import { useMessageListener } from './hooks/useMessageListener'; 
 import { useConversationManager } from './hooks/useConversationManager'; 
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
 import { deriveIdentityKeyFromAddress } from './utils/keyDerivation';
-import { encodeHandshakePayload, decodeHandshakePayload } from '@verbeth/sdk';
+import { 
+  encodeHandshakePayload, 
+  decodeHandshakePayload,
+  decryptHandshakeResponse,
+  parseHandshakePayload 
+} from '@verbeth/sdk';
 
 // Wrapper component to handle async contract creation
 function MessageInputWrapper({ 
@@ -73,6 +79,63 @@ function MessageInputWrapper({
     );
 }
 
+// Conversation View Wrapper
+function ConversationViewWrapper({
+    walletClient,
+    senderAddress,
+    senderSignKeyPair,
+    recipientAddress,
+    onClose,
+    onError
+}: {
+    walletClient: WalletClient;
+    senderAddress: string;
+    senderSignKeyPair: nacl.SignKeyPair;
+    recipientAddress: string;
+    onClose: () => void;
+    onError: (error: any) => void;
+}) {
+    const [contract, setContract] = useState<LogChainV1 | null>(null);
+
+    useEffect(() => {
+        async function createContract() {
+            try {
+                const provider = new BrowserProvider({
+                    request: async ({ method, params }) => {
+                        return await walletClient.request({ method: method as any, params });
+                    }
+                });
+                const signer = await provider.getSigner();
+                const contractInstance = new Contract(LOGCHAIN_ADDR, ABI, signer) as unknown as LogChainV1;
+                setContract(contractInstance);
+            } catch (error) {
+                onError(error);
+            }
+        }
+        createContract();
+    }, [walletClient, onError]);
+
+    if (!contract) {
+        return (
+            <div className="bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 p-6 text-center">
+                <p className="text-gray-600">Loading conversation...</p>
+            </div>
+        );
+    }
+
+    return (
+        <ConversationView
+            contract={contract}
+            senderAddress={senderAddress}
+            senderSignKeyPair={senderSignKeyPair}
+            recipientAddress={recipientAddress}
+            walletClient={walletClient}
+            onClose={onClose}
+            onError={onError}
+        />
+    );
+}
+
 // Minimal ABI with required functions
 const ABI = [
     "function sendMessage(bytes ciphertext, bytes32 topic, uint256 timestamp, uint256 nonce)",
@@ -87,14 +150,15 @@ export default function App() {
     const { data: walletClient } = useWalletClient();
     const [ready, setReady] = useState(false);
     const [selectedRecipient, setSelectedRecipient] = useState("");
-    const [pendingHandshakes, setPendingHandshakes] = useState<any[]>([]); // <-- ADD THIS
+    const [openConversation, setOpenConversation] = useState<string | null>(null);
+    const [pendingHandshakes, setPendingHandshakes] = useState<any[]>([]);
     const logRef = useRef<HTMLTextAreaElement | null>(null);
 
     // Demo cryptographic keys (in production, derive from wallet)
     const senderSign = nacl.sign.keyPair();
 
-    // ADD: Get conversation manager hook
-    const { respondToIncomingHandshake } = useConversationManager();
+    // Get conversation manager hook
+    const { respondToIncomingHandshake, processHandshakeResponse } = useConversationManager();
 
     useEffect(() => {
         setReady(readProvider !== null && isConnected && walletClient !== undefined);
@@ -143,7 +207,7 @@ export default function App() {
         }
     }, [pendingHandshakes, address]);
 
-    // ADD: Message listener hook with stable callbacks
+    // Message listener hook with stable callbacks
     const handleIncomingMessage = useCallback((message: any) => {
         console.log('📨 Incoming message:', message);
         if (logRef.current) {
@@ -155,135 +219,68 @@ export default function App() {
 
     const handleIncomingHandshake = useCallback((handshake: any) => {
         console.log('🤝 Incoming handshake:', handshake);
-        // Parse the handshake data to extract initiator pubkey
+        
+        // Check if we already have this handshake to avoid duplicates
+        setPendingHandshakes(prev => {
+            const exists = prev.some(h => h.transactionHash === handshake.transactionHash);
+            if (exists) {
+                console.log('🔄 Handshake already processed, skipping...');
+                return prev;
+            }
+            return [...prev, handshake];
+        });
+        
+        if (logRef.current) {
+            const timestamp = new Date().toLocaleTimeString();
+            logRef.current.value += `[${timestamp}] 🤝 Received handshake from ${handshake.sender}: "${handshake.plaintextPayload}"\n`;
+            logRef.current.scrollTop = logRef.current.scrollHeight;
+        }
+    }, []);
+
+    // NEW: Handle incoming handshake responses
+    const handleIncomingHandshakeResponse = useCallback(async (response: any) => {
+        console.log('📧 Incoming handshake response:', response);
+        
+        if (!walletClient || !address) {
+            console.warn('Wallet not ready for processing handshake response');
+            return;
+        }
+
         try {
-            const abiCoder = new AbiCoder();
-            // Decode the event data: identityPubKey, ephemeralPubKey, plaintextPayload
-            const decoded = abiCoder.decode(
-                ['bytes', 'bytes', 'bytes'], 
-                handshake.data
-            );
+            const success = await processHandshakeResponse(response, walletClient, address);
             
-            const [identityPubKeyBytes, ephemeralPubKeyBytes, plaintextPayloadBytes] = decoded;
-            
-            console.log('Decoded data:', { identityPubKeyBytes, ephemeralPubKeyBytes, plaintextPayloadBytes });
-            
-            // ethers AbiCoder returns hex strings for bytes, convert them properly
-            let identityPubKey, ephemeralPubKey;
-            
-            if (typeof identityPubKeyBytes === 'string' && identityPubKeyBytes.startsWith('0x')) {
-                const hexString = identityPubKeyBytes.slice(2);
-                const matchResult = hexString.match(/.{2}/g);
-                if (matchResult) {
-                    identityPubKey = new Uint8Array(matchResult.map(byte => parseInt(byte, 16)));
-                } else {
-                    throw new Error("Failed to parse hex string into bytes");
+            if (success) {
+                if (logRef.current) {
+                    const timestamp = new Date().toLocaleTimeString();
+                    logRef.current.value += `[${timestamp}] ✅ Handshake response processed from ${response.responder}\n`;
+                    logRef.current.scrollTop = logRef.current.scrollHeight;
                 }
             } else {
-                identityPubKey = identityPubKeyBytes instanceof Uint8Array 
-                    ? identityPubKeyBytes 
-                    : Uint8Array.from(identityPubKeyBytes);
-            }
-            
-            if (typeof ephemeralPubKeyBytes === 'string' && ephemeralPubKeyBytes.startsWith('0x')) {
-                const hexString = ephemeralPubKeyBytes.slice(2);
-                const matchResult = hexString.match(/.{2}/g);
-                if (matchResult) {
-                    ephemeralPubKey = new Uint8Array(matchResult.map(byte => parseInt(byte, 16)));
-                } else {
-                    throw new Error("Failed to parse hex string into bytes");
+                if (logRef.current) {
+                    const timestamp = new Date().toLocaleTimeString();
+                    logRef.current.value += `[${timestamp}] ❌ Failed to process handshake response from ${response.responder}\n`;
+                    logRef.current.scrollTop = logRef.current.scrollHeight;
                 }
-            } else {
-                ephemeralPubKey = ephemeralPubKeyBytes instanceof Uint8Array 
-                    ? ephemeralPubKeyBytes 
-                    : Uint8Array.from(ephemeralPubKeyBytes);
-            }
-            
-            // Convert bytes to string for plaintext payload
-            // For hex strings, we need to remove 0x and convert to bytes properly
-            let plaintextPayload;
-            if (typeof plaintextPayloadBytes === 'string' && plaintextPayloadBytes.startsWith('0x')) {
-                // It's a hex string, convert to bytes then to string
-                const hexString = plaintextPayloadBytes.slice(2);
-                const matchResult = hexString.match(/.{2}/g);
-                if (!matchResult) {
-                    throw new Error("Failed to parse hex string into bytes");
-                }
-                const bytes = new Uint8Array(matchResult.map(byte => parseInt(byte, 16)));
-                plaintextPayload = new TextDecoder().decode(bytes);
-            } else {
-                // It's already bytes
-                const plaintextPayloadArray = plaintextPayloadBytes instanceof Uint8Array 
-                    ? plaintextPayloadBytes 
-                    : Uint8Array.from(plaintextPayloadBytes);
-                plaintextPayload = new TextDecoder().decode(plaintextPayloadArray);
-            }
-            
-            console.log('Parsed handshake:', { 
-                identityPubKey: Array.from(identityPubKey), 
-                ephemeralPubKey: Array.from(ephemeralPubKey), 
-                plaintextPayload 
-            });
-            
-            // Clean the sender address by removing leading zeros
-            const cleanSenderAddress = handshake.sender.replace(/^0x0+/, '0x');
-            
-            // Create HandshakePayload using SDK structure
-            const handshakePayload = {
-                identityPubKey,
-                ephemeralPubKey,
-                plaintextPayload
-            };
-            
-            // Encode using SDK for consistent serialization
-            const encodedPayload = encodeHandshakePayload(handshakePayload);
-            
-            const handshakeWithParsedData = {
-                ...handshake,
-                sender: cleanSenderAddress,
-                // Store encoded payload for consistent serialization
-                encodedPayload,
-                // Keep readable fields for UI
-                plaintextPayload,
-                // Store arrays for immediate use (will be reconstructed from encodedPayload on reload)
-                identityPubKey: Array.from(identityPubKey),
-                ephemeralPubKey: Array.from(ephemeralPubKey)
-            };
-            
-            // Check if we already have this handshake to avoid duplicates
-            setPendingHandshakes(prev => {
-                const exists = prev.some(h => h.transactionHash === handshake.transactionHash);
-                if (exists) {
-                    console.log('🔄 Handshake already processed, skipping...');
-                    return prev;
-                }
-                return [...prev, handshakeWithParsedData];
-            });
-            
-            if (logRef.current) {
-                const timestamp = new Date().toLocaleTimeString();
-                logRef.current.value += `[${timestamp}] 🤝 Received handshake from ${cleanSenderAddress}: "${plaintextPayload}"\n`;
-                logRef.current.scrollTop = logRef.current.scrollHeight;
             }
         } catch (error) {
-            console.error('Failed to parse handshake data:', error);
+            console.error('Error processing handshake response:', error);
             if (logRef.current) {
                 const timestamp = new Date().toLocaleTimeString();
-                logRef.current.value += `[${timestamp}] ❌ Failed to parse handshake\n`;
+                logRef.current.value += `[${timestamp}] ❌ Error processing handshake response: ${error instanceof Error ? error.message : String(error)}\n`;
                 logRef.current.scrollTop = logRef.current.scrollHeight;
             }
         }
-    }, []);
+    }, [processHandshakeResponse, walletClient, address]);
 
     useMessageListener({
         readProvider,
         userAddress: address || null,
         onIncomingMessage: handleIncomingMessage,
-        onIncomingHandshake: handleIncomingHandshake
+        onIncomingHandshake: handleIncomingHandshake,
+        onIncomingHandshakeResponse: handleIncomingHandshakeResponse // NEW
     });
 
-
-    // ADD: Component for handshake card with custom response
+    // Component for handshake card with custom response
     const HandshakeCard = ({ handshake, onAccept }: { handshake: any, onAccept: (handshake: any, response: string) => Promise<void> }) => {
         const [responseMessage, setResponseMessage] = useState("Hello! Nice to meet you 👋");
         const [isResponding, setIsResponding] = useState(false);
@@ -339,7 +336,8 @@ export default function App() {
             </div>
         );
     };
-    // ADD: Function to accept handshake with custom response message
+
+    // Function to accept handshake with custom response message
     const acceptHandshake = useCallback(async (handshake: any, responseMessage: string) => {
         if (!walletClient || !ready || !address) return;
 
@@ -354,46 +352,20 @@ export default function App() {
 
             console.log('Debug handshake object:', {
                 handshake,
-                hasEncodedPayload: !!handshake.encodedPayload,
+                hasHandshakeContent: !!handshake.handshakeContent,
                 identityPubKey: handshake.identityPubKey,
                 identityPubKeyType: typeof handshake.identityPubKey
             });
 
-            // Use SDK to decode the handshake payload if available
+            // Use handshake data parsed by SDK
             let identityPubKey: Uint8Array;
             
-            if (handshake.encodedPayload) {
-                // Decode using SDK function
-                const decodedPayload = decodeHandshakePayload(handshake.encodedPayload);
-                identityPubKey = decodedPayload.identityPubKey;
-                console.log('Decoded handshake using SDK:', {
-                    plaintextPayload: decodedPayload.plaintextPayload,
-                    identityPubKey: Array.from(decodedPayload.identityPubKey),
-                    ephemeralPubKey: Array.from(decodedPayload.ephemeralPubKey)
-                });
+            if (Array.isArray(handshake.identityPubKey)) {
+                identityPubKey = new Uint8Array(handshake.identityPubKey);
+            } else if (handshake.identityPubKey instanceof Uint8Array) {
+                identityPubKey = handshake.identityPubKey;
             } else {
-                // Fallback to manual parsing for backwards compatibility
-                if (typeof handshake.identityPubKey === 'string' && handshake.identityPubKey.startsWith('0x')) {
-                    const hexString = handshake.identityPubKey.slice(2);
-                    identityPubKey = new Uint8Array(hexString.match(/.{2}/g)!.map((byte: string) => parseInt(byte, 16)));
-                } else if (Array.isArray(handshake.identityPubKey)) {
-                    identityPubKey = new Uint8Array(handshake.identityPubKey);
-                } else if (handshake.identityPubKey instanceof Uint8Array) {
-                    identityPubKey = handshake.identityPubKey;
-                } else if (handshake.identityPubKey && typeof handshake.identityPubKey === 'object') {
-                    const keys = Object.keys(handshake.identityPubKey);
-                    if (keys.length === 32 && keys.every(k => !isNaN(parseInt(k)))) {
-                        const array = new Array(32);
-                        for (let i = 0; i < 32; i++) {
-                            array[i] = handshake.identityPubKey[i];
-                        }
-                        identityPubKey = new Uint8Array(array);
-                    } else {
-                        throw new Error(`Unsupported identityPubKey object structure. Keys: ${JSON.stringify(keys.slice(0, 5))}`);
-                    }
-                } else {
-                    throw new Error(`Unsupported identityPubKey type: ${typeof handshake.identityPubKey}, value: ${JSON.stringify(handshake.identityPubKey)}`);
-                }
+                throw new Error(`Unsupported identityPubKey type: ${typeof handshake.identityPubKey}`);
             }
 
             // Validate key length
@@ -401,16 +373,12 @@ export default function App() {
                 throw new Error(`Invalid key length: ${identityPubKey.length}, expected 32 bytes`);
             }
 
-            // Derive deterministic identity key for this address
-            const responderIdentityPubKey = await deriveIdentityKeyFromAddress(walletClient, address);
-
             console.log('Accepting handshake with:', {
                 sender: handshake.sender,
                 identityPubKey: Array.from(identityPubKey),
                 length: identityPubKey.length,
                 plaintextPayload: handshake.plaintextPayload,
-                responseMessage,
-                responderIdentityPubKey: Array.from(responderIdentityPubKey)
+                responseMessage
             });
 
             await respondToIncomingHandshake({
@@ -455,7 +423,7 @@ export default function App() {
                 logRef.current.scrollTop = logRef.current.scrollHeight;
             }
         }
-    }, [walletClient, ready, respondToIncomingHandshake, address, deriveIdentityKeyFromAddress]);
+    }, [walletClient, ready, respondToIncomingHandshake, address]);
 
     const handleMessageSent = (result: any) => {
         if (logRef.current) {
@@ -492,7 +460,7 @@ export default function App() {
         <div className="min-h-screen bg-gray-50">
             {/* HEADER CON LOGO E TITOLO */}
             <header className="bg-white border-b border-gray-200">
-                <div className="max-w-4xl mx-auto px-4 py-4 flex justify-between items-center">
+                <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
                     <div className="flex items-center space-x-3">
                         <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
                             <span className="text-white font-bold text-sm">V</span>
@@ -504,9 +472,9 @@ export default function App() {
                 </div>
             </header>
 
-            {/* MAIN: due colonne, sinistra conversazioni + status, destra chat + log */}
-            <main className="max-w-4xl mx-auto px-4 py-8">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* MAIN: layout a tre colonne quando una conversazione è aperta */}
+            <main className="max-w-7xl mx-auto px-4 py-8">
+                <div className={`grid gap-6 ${openConversation ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 lg:grid-cols-2'}`}>
                     {/* LEFT COLUMN */}
                     <div className="space-y-6">
                         {/* STATUS */}
@@ -536,7 +504,7 @@ export default function App() {
                             )}
                         </div>
 
-                        {/* ADD: PENDING HANDSHAKES SECTION */}
+                        {/* PENDING HANDSHAKES SECTION */}
                         {pendingHandshakes.length > 0 && (
                             <div className="bg-yellow-50 rounded-xl border border-yellow-200 p-6">
                                 <h2 className="text-lg font-semibold text-yellow-900 mb-4">
@@ -557,29 +525,53 @@ export default function App() {
                         {/* CONVERSATION LIST */}
                         <ConversationList
                             selectedRecipient={selectedRecipient}
-                            onRecipientSelect={setSelectedRecipient}
+                            onRecipientSelect={(recipient) => {
+                                setSelectedRecipient(recipient);
+                                // Open conversation view if recipient selected
+                                if (recipient) {
+                                    setOpenConversation(recipient);
+                                }
+                            }}
                         />
                     </div>
 
-                    {/* RIGHT COLUMN */}
-                    <div className="space-y-6">
-                        {/* MESSAGING */}
-                        {selectedRecipient && ready && address && walletClient ? (
-                            <MessageInputWrapper
+                    {/* MIDDLE COLUMN - Conversation View */}
+                    {openConversation && ready && address && walletClient && (
+                        <div className="lg:col-span-1">
+                            <ConversationViewWrapper
                                 senderAddress={address}
                                 senderSignKeyPair={senderSign}
-                                recipientAddress={selectedRecipient}
+                                recipientAddress={openConversation}
                                 walletClient={walletClient}
-                                onMessageSent={handleMessageSent}
+                                onClose={() => setOpenConversation(null)}
                                 onError={handleError}
-                                disabled={!ready}
                             />
-                        ) : (
-                            <div className="bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 p-6 text-center">
-                                <p className="text-gray-600">
-                                    {!ready ? "Connect wallet and wait for sync to start messaging" : "Select a recipient to start messaging"}
-                                </p>
-                            </div>
+                        </div>
+                    )}
+
+                    {/* RIGHT COLUMN - Legacy messaging + Log */}
+                    <div className="space-y-6">
+                        {/* LEGACY MESSAGING (solo se non c'è conversazione aperta) */}
+                        {!openConversation && (
+                            <>
+                                {selectedRecipient && ready && address && walletClient ? (
+                                    <MessageInputWrapper
+                                        senderAddress={address}
+                                        senderSignKeyPair={senderSign}
+                                        recipientAddress={selectedRecipient}
+                                        walletClient={walletClient}
+                                        onMessageSent={handleMessageSent}
+                                        onError={handleError}
+                                        disabled={!ready}
+                                    />
+                                ) : (
+                                    <div className="bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 p-6 text-center">
+                                        <p className="text-gray-600">
+                                            {!ready ? "Connect wallet and wait for sync to start messaging" : "Select a recipient to start messaging"}
+                                        </p>
+                                    </div>
+                                )}
+                            </>
                         )}
 
                         {/* LOG */}
@@ -594,7 +586,6 @@ export default function App() {
                                 />
                             </div>
                         </div>
-
                     </div>
                 </div>
             </main>

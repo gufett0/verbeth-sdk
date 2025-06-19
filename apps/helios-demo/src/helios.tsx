@@ -15,7 +15,7 @@ export function HeliosProvider({ children }: { children: React.ReactNode }) {
       const helios = new RawHelios(
         {
           executionRpc: "https://base-rpc.publicnode.com",
-          //executionVerifiableApi: "https://base-rpc.publicnode.com",
+          //executionVerifiableApi: "https://base-vapi.publicnode.com",
           // consensusRpc: "https://base.operationsolarstorm.org", // opzionale per opstack
           dbType: "localstorage",
           network: "base" as Network,

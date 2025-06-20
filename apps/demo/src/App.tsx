@@ -1,614 +1,580 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback } from "react";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useWalletClient } from 'wagmi';
-import { WalletClient } from 'viem';
+import { useRpcProvider } from './rpc';
+import { Contract, BrowserProvider, keccak256, toUtf8Bytes, hexlify } from "ethers";
 import nacl from "tweetnacl";
-import { Contract, BrowserProvider, AbiCoder } from "ethers";
-import { useRpcProvider } from "./rpc";
-import { MessageInput } from "./components/MessageInput";
-import { ConversationList } from "./components/ConversationList";
-import { ConversationView } from "./components/ConversationView";
-import { useMessageListener } from './hooks/useMessageListener'; 
-import { useConversationManager } from './hooks/useConversationManager'; 
-import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
-import { deriveIdentityKeyFromAddress } from './utils/keyDerivation';
 import { 
-  encodeHandshakePayload, 
-  decodeHandshakePayload,
-  decryptHandshakeResponse,
-  parseHandshakePayload 
+  sendEncryptedMessage,
+  encryptStructuredPayload,
+  initiateHandshake,
+  HandshakeResponseContent
 } from '@verbeth/sdk';
+import { useMessageListener } from './hooks/useMessageListener';
 
-// Wrapper component to handle async contract creation
-function MessageInputWrapper({ 
-    walletClient, 
-    senderAddress, 
-    senderSignKeyPair, 
-    recipientAddress,
-    onMessageSent,
-    onError,
-    disabled 
-}: {
-    walletClient: WalletClient;
-    senderAddress: string;
-    senderSignKeyPair: nacl.SignKeyPair;
-    recipientAddress: string;
-    onMessageSent: (result: any) => void;
-    onError: (error: any) => void;
-    disabled: boolean;
-}) {
-    const [contract, setContract] = useState<LogChainV1 | null>(null);
-
-    useEffect(() => {
-        async function createContract() {
-            try {
-                const provider = new BrowserProvider({
-                    request: async ({ method, params }) => {
-                        return await walletClient.request({ method: method as any, params });
-                    }
-                });
-                const signer = await provider.getSigner();
-                const contractInstance = new Contract(LOGCHAIN_ADDR, ABI, signer) as unknown as LogChainV1;
-                setContract(contractInstance);
-            } catch (error) {
-                onError(error);
-            }
-        }
-        createContract();
-    }, [walletClient, onError]);
-
-    if (!contract) {
-        return (
-            <div className="bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 p-6 text-center">
-                <p className="text-gray-600">Loading contract...</p>
-            </div>
-        );
-    }
-
-    return (
-        <MessageInput
-            contract={contract}
-            senderAddress={senderAddress}
-            senderSignKeyPair={senderSignKeyPair}
-            recipientAddress={recipientAddress}
-            walletClient={walletClient} 
-            onMessageSent={onMessageSent}
-            onError={onError}
-            disabled={disabled}
-        />
-    );
-}
-
-// Conversation View Wrapper
-function ConversationViewWrapper({
-    walletClient,
-    senderAddress,
-    senderSignKeyPair,
-    recipientAddress,
-    onClose,
-    onError
-}: {
-    walletClient: WalletClient;
-    senderAddress: string;
-    senderSignKeyPair: nacl.SignKeyPair;
-    recipientAddress: string;
-    onClose: () => void;
-    onError: (error: any) => void;
-}) {
-    const [contract, setContract] = useState<LogChainV1 | null>(null);
-
-    useEffect(() => {
-        async function createContract() {
-            try {
-                const provider = new BrowserProvider({
-                    request: async ({ method, params }) => {
-                        return await walletClient.request({ method: method as any, params });
-                    }
-                });
-                const signer = await provider.getSigner();
-                const contractInstance = new Contract(LOGCHAIN_ADDR, ABI, signer) as unknown as LogChainV1;
-                setContract(contractInstance);
-            } catch (error) {
-                onError(error);
-            }
-        }
-        createContract();
-    }, [walletClient, onError]);
-
-    if (!contract) {
-        return (
-            <div className="bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 p-6 text-center">
-                <p className="text-gray-600">Loading conversation...</p>
-            </div>
-        );
-    }
-
-    return (
-        <ConversationView
-            contract={contract}
-            senderAddress={senderAddress}
-            senderSignKeyPair={senderSignKeyPair}
-            recipientAddress={recipientAddress}
-            walletClient={walletClient}
-            onClose={onClose}
-            onError={onError}
-        />
-    );
-}
-
-// Minimal ABI with required functions
-const ABI = [
-    "function sendMessage(bytes ciphertext, bytes32 topic, uint256 timestamp, uint256 nonce)",
-    "function initiateHandshake(bytes32 recipientHash, bytes identityPubKey, bytes ephemeralPubKey, bytes plaintextPayload)",
-    "function respondToHandshake(bytes32 inResponseTo, bytes ciphertext)"
+// Constants
+const LOGCHAIN_ABI = [
+  "event MessageSent(address indexed sender, bytes ciphertext, uint256 timestamp, bytes32 indexed topic, uint256 nonce)",
+  "event Handshake(bytes32 indexed recipientHash, address indexed sender, bytes identityPubKey, bytes ephemeralPubKey, bytes plaintextPayload)",
+  "event HandshakeResponse(bytes32 indexed inResponseTo, address indexed responder, bytes ciphertext)",
+  "function sendMessage(bytes calldata ciphertext, bytes32 topic, uint256 timestamp, uint256 nonce)",
+  "function initiateHandshake(bytes32 recipientHash, bytes identityPubKey, bytes ephemeralPubKey, bytes plaintextPayload)",
+  "function respondToHandshake(bytes32 inResponseTo, bytes ciphertext)"
 ];
+
 const LOGCHAIN_ADDR = "0xf9fe7E57459CC6c42791670FaD55c1F548AE51E8";
+const CONTRACT_CREATION_BLOCK = 30568313;
+const EVENTS_PER_CHUNK = 20; // For debug info display
+
+interface Contact {
+  address: string;
+  pubKey?: Uint8Array;
+  ephemeralKey?: Uint8Array;
+  topic?: string;
+  status: 'none' | 'handshake_sent' | 'established';
+  lastMessage?: string;
+  lastTimestamp?: number;
+}
 
 export default function App() {
-    const readProvider = useRpcProvider();
-    const { address, isConnected } = useAccount();
-    const { data: walletClient } = useWalletClient();
-    const [ready, setReady] = useState(false);
-    const [selectedRecipient, setSelectedRecipient] = useState("");
-    const [openConversation, setOpenConversation] = useState<string | null>(null);
-    const [pendingHandshakes, setPendingHandshakes] = useState<any[]>([]);
-    const logRef = useRef<HTMLTextAreaElement | null>(null);
+  const readProvider = useRpcProvider();
+  const { address, isConnected } = useAccount();
+  const { data: walletClient } = useWalletClient();
+  
+  // State
+  const [ready, setReady] = useState(false);
+  const [contract, setContract] = useState<Contract | null>(null);
+  const [recipientAddress, setRecipientAddress] = useState("");
+  const [message, setMessage] = useState("");
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [loading, setLoading] = useState(false);
+  
+  // Refs
+  const logRef = useRef<HTMLTextAreaElement>(null);
+  
+  // Demo keys - in production, derive from wallet
+  const senderSignKeyPair = useRef(nacl.sign.keyPair());
+  const myIdentityKey = useRef<Uint8Array | null>(null);
 
-    // Demo cryptographic keys (in production, derive from wallet)
-    const senderSign = nacl.sign.keyPair();
+  useEffect(() => {
+    setReady(readProvider !== null && isConnected && walletClient !== undefined);
+  }, [readProvider, isConnected, walletClient]);
 
-    // Get conversation manager hook
-    const { respondToIncomingHandshake, processHandshakeResponse } = useConversationManager();
+  // Helper functions
+  const addLog = (message: string) => {
+    if (logRef.current) {
+      const timestamp = new Date().toLocaleTimeString();
+      logRef.current.value += `[${timestamp}] ${message}\n`;
+      logRef.current.scrollTop = logRef.current.scrollHeight;
+    }
+  };
 
-    useEffect(() => {
-        setReady(readProvider !== null && isConnected && walletClient !== undefined);
-    }, [readProvider, isConnected, walletClient]);
+  // Message listener hook - FIXED: Pass all required props
+  const {
+    messages,
+    pendingHandshakes,
+    isInitialLoading,
+    isLoadingMore,
+    canLoadMore,
+    syncProgress,
+    loadMoreHistory,
+    addMessage,
+    removePendingHandshake
+  } = useMessageListener({
+    readProvider,
+    address,
+    contacts,
+    myIdentityKey: myIdentityKey.current,
+    senderSignKeyPair: senderSignKeyPair.current,
+    onContactsUpdate: (newContacts) => setContacts(newContacts),
+    onLog: addLog
+  });
 
-    // Clean up handshakes when address changes
-    useEffect(() => {
-        if (address) {
-            // Load handshakes for the new address
-            try {
-                const stored = localStorage.getItem(`verbeth_handshakes_${address.toLowerCase()}`);
-                const handshakes = stored ? JSON.parse(stored) : [];
-                
-                // Filter out old handshakes (older than 24 hours)
-                const now = Date.now();
-                const dayInMs = 24 * 60 * 60 * 1000;
-                const recentHandshakes = handshakes.filter((h: any) => (now - h.timestamp) < dayInMs);
-                
-                setPendingHandshakes(recentHandshakes);
-                
-                // Update localStorage if we filtered out old ones
-                if (recentHandshakes.length !== handshakes.length) {
-                    if (recentHandshakes.length === 0) {
-                        localStorage.removeItem(`verbeth_handshakes_${address.toLowerCase()}`);
-                    } else {
-                        localStorage.setItem(`verbeth_handshakes_${address.toLowerCase()}`, JSON.stringify(recentHandshakes));
-                    }
-                }
-            } catch (error) {
-                console.warn('Failed to load handshakes for new address:', error);
-                setPendingHandshakes([]);
-            }
-        } else {
-            setPendingHandshakes([]);
-        }
-    }, [address]);
+  // Initialize contract and identity key
+  useEffect(() => {
+    if (!ready || !readProvider || !walletClient || !address) return;
 
-    // Save handshakes to localStorage when they change
-    useEffect(() => {
-        if (address && pendingHandshakes.length > 0) {
-            try {
-                localStorage.setItem(`verbeth_handshakes_${address.toLowerCase()}`, JSON.stringify(pendingHandshakes));
-            } catch (error) {
-                console.warn('Failed to save handshakes to localStorage:', error);
-            }
-        }
-    }, [pendingHandshakes, address]);
+    const initContract = async () => {
+      try {
+        const ethersProvider = new BrowserProvider(walletClient.transport);
+        const signer = await ethersProvider.getSigner();
+        const contractInstance = new Contract(LOGCHAIN_ADDR, LOGCHAIN_ABI, signer);
+        setContract(contractInstance);
 
-    // Message listener hook with stable callbacks
-    const handleIncomingMessage = useCallback((message: any) => {
-        console.log('📨 Incoming message:', message);
-        if (logRef.current) {
-            const timestamp = new Date().toLocaleTimeString();
-            logRef.current.value += `[${timestamp}] 📨 Received message from ${message.sender}\n`;
-            logRef.current.scrollTop = logRef.current.scrollHeight;
-        }
-    }, []);
-
-    const handleIncomingHandshake = useCallback((handshake: any) => {
-        console.log('🤝 Incoming handshake:', handshake);
+        // Derive identity key from wallet - simplified for demo
+        // In reality, this should be derived from wallet signature
+        myIdentityKey.current = nacl.box.keyPair().publicKey; // Placeholder
         
-        // Check if we already have this handshake to avoid duplicates
-        setPendingHandshakes(prev => {
-            const exists = prev.some(h => h.transactionHash === handshake.transactionHash);
-            if (exists) {
-                console.log('🔄 Handshake already processed, skipping...');
-                return prev;
-            }
-            return [...prev, handshake];
-        });
-        
-        if (logRef.current) {
-            const timestamp = new Date().toLocaleTimeString();
-            logRef.current.value += `[${timestamp}] 🤝 Received handshake from ${handshake.sender}: "${handshake.plaintextPayload}"\n`;
-            logRef.current.scrollTop = logRef.current.scrollHeight;
-        }
-    }, []);
-
-    // NEW: Handle incoming handshake responses
-    const handleIncomingHandshakeResponse = useCallback(async (response: any) => {
-        console.log('📧 Incoming handshake response:', response);
-        
-        if (!walletClient || !address) {
-            console.warn('Wallet not ready for processing handshake response');
-            return;
-        }
-
-        try {
-            const success = await processHandshakeResponse(response, walletClient, address);
-            
-            if (success) {
-                if (logRef.current) {
-                    const timestamp = new Date().toLocaleTimeString();
-                    logRef.current.value += `[${timestamp}] ✅ Handshake response processed from ${response.responder}\n`;
-                    logRef.current.scrollTop = logRef.current.scrollHeight;
-                }
-            } else {
-                if (logRef.current) {
-                    const timestamp = new Date().toLocaleTimeString();
-                    logRef.current.value += `[${timestamp}] ❌ Failed to process handshake response from ${response.responder}\n`;
-                    logRef.current.scrollTop = logRef.current.scrollHeight;
-                }
-            }
-        } catch (error) {
-            console.error('Error processing handshake response:', error);
-            if (logRef.current) {
-                const timestamp = new Date().toLocaleTimeString();
-                logRef.current.value += `[${timestamp}] ❌ Error processing handshake response: ${error instanceof Error ? error.message : String(error)}\n`;
-                logRef.current.scrollTop = logRef.current.scrollHeight;
-            }
-        }
-    }, [processHandshakeResponse, walletClient, address]);
-
-    useMessageListener({
-        readProvider,
-        userAddress: address || null,
-        onIncomingMessage: handleIncomingMessage,
-        onIncomingHandshake: handleIncomingHandshake,
-        onIncomingHandshakeResponse: handleIncomingHandshakeResponse // NEW
-    });
-
-    // Component for handshake card with custom response and verification status
-    const HandshakeCard = ({ handshake, onAccept }: { handshake: any, onAccept: (handshake: any, response: string) => Promise<void> }) => {
-        const [responseMessage, setResponseMessage] = useState("Hello! Nice to meet you 👋");
-        const [isResponding, setIsResponding] = useState(false);
-
-        const handleAccept = async () => {
-            setIsResponding(true);
-            try {
-                await onAccept(handshake, responseMessage);
-            } catch (error) {
-                console.error('Failed to accept handshake:', error);
-            } finally {
-                setIsResponding(false);
-            }
-        };
-
-        // Get verification status
-        const isVerified = handshake.isVerified === true;
-        const hasVerificationInfo = handshake.isVerified !== undefined;
-
-        return (
-            <div className="bg-white rounded-lg p-4 border border-yellow-200">
-                <div className="space-y-3">
-                    <div>
-                        <div className="flex items-center justify-between mb-2">
-                            <p className="font-medium text-gray-900">From: {handshake.sender}</p>
-                            {hasVerificationInfo && (
-                                <div className={`px-2 py-1 rounded-full text-xs font-medium ${
-                                    isVerified 
-                                        ? 'bg-green-100 text-green-800 border border-green-200' 
-                                        : 'bg-red-100 text-red-800 border border-red-200'
-                                }`}>
-                                    {isVerified ? '🔐 Verified' : '⚠️ Unverified'}
-                                </div>
-                            )}
-                        </div>
-                        <p className="text-sm text-gray-600">Message: "{handshake.plaintextPayload}"</p>
-                        <p className="text-sm text-gray-500">Block: {handshake.blockNumber}</p>
-                        {!isVerified && hasVerificationInfo && (
-                            <p className="text-xs text-red-600 mt-1">
-                                ⚠️ Identity verification failed - proceed with caution
-                            </p>
-                        )}
-                    </div>
-                    
-                    <div>
-                        <label htmlFor={`response-${handshake.transactionHash}`} className="block text-sm font-medium text-gray-700 mb-1">
-                            Your Response:
-                        </label>
-                        <textarea
-                            id={`response-${handshake.transactionHash}`}
-                            rows={2}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                            placeholder="Type your response message..."
-                            value={responseMessage}
-                            onChange={(e) => setResponseMessage(e.target.value)}
-                            disabled={isResponding}
-                        />
-                    </div>
-                    
-                    <div className="flex justify-end space-x-2">
-                        <button
-                            onClick={handleAccept}
-                            disabled={isResponding || !responseMessage.trim()}
-                            className="bg-green-600 text-white px-4 py-2 rounded-md text-sm hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-                        >
-                            {isResponding && (
-                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                            )}
-                            <span>{isResponding ? 'Responding...' : 'Accept & Respond'}</span>
-                        </button>
-                    </div>
-                </div>
-            </div>
-        );
+        addLog("✅ Contract initialized and ready");
+      } catch (error) {
+        console.error("Failed to initialize contract:", error);
+        addLog("❌ Failed to initialize contract");
+      }
     };
 
-    // Function to accept handshake with custom response message
-    const acceptHandshake = useCallback(async (handshake: any, responseMessage: string) => {
-        if (!walletClient || !ready || !address) return;
+    initContract();
+  }, [ready, readProvider, walletClient, address]);
 
-        try {
-            const provider = new BrowserProvider({
-                request: async ({ method, params }) => {
-                    return await walletClient.request({ method: method as any, params });
-                }
-            });
-            const signer = await provider.getSigner();
-            const contract = new Contract(LOGCHAIN_ADDR, ABI, signer) as unknown as LogChainV1;
+  const calculateRecipientHash = (recipientAddr: string) => {
+    return keccak256(toUtf8Bytes(`contact:${recipientAddr.toLowerCase()}`));
+  };
 
-            console.log('Debug handshake object:', {
-                handshake,
-                hasHandshakeContent: !!handshake.handshakeContent,
-                identityPubKey: handshake.identityPubKey,
-                identityPubKeyType: typeof handshake.identityPubKey
-            });
+  // Load contacts from localStorage
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('verbeth_contacts');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setContacts(parsed.map((c: any) => ({
+          ...c,
+          pubKey: c.pubKey ? new Uint8Array(c.pubKey) : undefined,
+          ephemeralKey: c.ephemeralKey ? new Uint8Array(c.ephemeralKey) : undefined
+        })));
+      }
+    } catch (error) {
+      console.error("Failed to load contacts:", error);
+    }
+  }, []);
 
-            // Use handshake data parsed by SDK
-            let identityPubKey: Uint8Array;
-            
-            if (Array.isArray(handshake.identityPubKey)) {
-                identityPubKey = new Uint8Array(handshake.identityPubKey);
-            } else if (handshake.identityPubKey instanceof Uint8Array) {
-                identityPubKey = handshake.identityPubKey;
-            } else {
-                throw new Error(`Unsupported identityPubKey type: ${typeof handshake.identityPubKey}`);
-            }
+  // Save contacts to localStorage
+  const saveContacts = useCallback((newContacts: Contact[]) => {
+    try {
+      const serializable = newContacts.map(c => ({
+        ...c,
+        pubKey: c.pubKey ? Array.from(c.pubKey) : undefined,
+        ephemeralKey: c.ephemeralKey ? Array.from(c.ephemeralKey) : undefined
+      }));
+      localStorage.setItem('verbeth_contacts', JSON.stringify(serializable));
+      setContacts(newContacts);
+    } catch (error) {
+      console.error("Failed to save contacts:", error);
+    }
+  }, []);
 
-            // Validate key length
-            if (identityPubKey.length !== 32) {
-                throw new Error(`Invalid key length: ${identityPubKey.length}, expected 32 bytes`);
-            }
+  // FIXED: Use correct SDK initiateHandshake function signature
+  const sendHandshake = async () => {
+    if (!contract || !address || !recipientAddress || !message || !myIdentityKey.current) {
+      addLog("❌ Missing required data for handshake");
+      return;
+    }
 
-            console.log('Accepting handshake with:', {
-                sender: handshake.sender,
-                identityPubKey: Array.from(identityPubKey),
-                length: identityPubKey.length,
-                plaintextPayload: handshake.plaintextPayload,
-                responseMessage
-            });
+    setLoading(true);
+    try {
+      // Generate ephemeral keypair for this handshake
+      const ephemeralKeyPair = nacl.box.keyPair();
+      
+      // Use correct SDK function signature
+      const tx = await initiateHandshake({
+        contract: contract as any,
+        recipientAddress,  // Correct parameter name
+        identityPubKey: myIdentityKey.current,
+        ephemeralPubKey: ephemeralKeyPair.publicKey,
+        plaintextPayload: message  // Correct parameter name
+      });
+      
+      // Add to contacts
+      const newContact: Contact = {
+        address: recipientAddress,
+        status: 'handshake_sent',
+        ephemeralKey: ephemeralKeyPair.secretKey, // Store for decrypting response
+        topic: tx.hash, // Store tx hash for tracking
+        lastMessage: message,
+        lastTimestamp: Date.now()
+      };
+      
+      const updatedContacts = [...contacts.filter(c => c.address !== recipientAddress), newContact];
+      saveContacts(updatedContacts);
+      
+      addLog(`📤 Handshake sent to ${recipientAddress.slice(0, 8)}...: "${message}"`);
+      setMessage("");
+    } catch (error) {
+      console.error("Failed to send handshake:", error);
+      addLog(`❌ Failed to send handshake: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-            await respondToIncomingHandshake({
-                contract,
-                inResponseTo: handshake.transactionHash,
-                initiatorAddress: handshake.sender,
-                initiatorPubKey: identityPubKey,
-                responseMessage: responseMessage,
-                walletClient: walletClient,
-                responderAddress: address
-            });
+  // FIXED: Use SDK encryptStructuredPayload function
+  const acceptHandshake = async (handshake: any, responseMessage: string) => {
+    if (!contract || !address || !myIdentityKey.current) {
+      addLog("❌ Missing required data for handshake response");
+      return;
+    }
 
-            // Remove from pending handshakes and update localStorage
-            setPendingHandshakes(prev => {
-                const updated = prev.filter(h => h.transactionHash !== handshake.transactionHash);
-                // Update localStorage immediately
-                if (address) {
-                    try {
-                        if (updated.length === 0) {
-                            localStorage.removeItem(`verbeth_handshakes_${address.toLowerCase()}`);
-                        } else {
-                            localStorage.setItem(`verbeth_handshakes_${address.toLowerCase()}`, JSON.stringify(updated));
-                        }
-                    } catch (error) {
-                        console.warn('Failed to update localStorage:', error);
-                    }
-                }
-                return updated;
-            });
+    try {
+      const responderEphemeralKeyPair = nacl.box.keyPair();
+      
+      const responseContent: HandshakeResponseContent = {
+        identityPubKey: myIdentityKey.current,
+        ephemeralPubKey: responderEphemeralKeyPair.publicKey,
+        note: responseMessage
+      };
+      
+      // Use SDK function for encrypting response
+      const encryptedResponse = encryptStructuredPayload(
+        responseContent,
+        handshake.ephemeralPubKey,
+        responderEphemeralKeyPair.secretKey,
+        responderEphemeralKeyPair.publicKey
+      );
+      
+      const tx = await contract.respondToHandshake(
+        handshake.id,
+        toUtf8Bytes(encryptedResponse)
+      );
+      
+      // Add to contacts
+      const newContact: Contact = {
+        address: handshake.sender,
+        status: 'established',
+        pubKey: handshake.identityPubKey,
+        lastMessage: responseMessage,
+        lastTimestamp: Date.now()
+      };
+      
+      const updatedContacts = [...contacts.filter(c => c.address !== handshake.sender), newContact];
+      saveContacts(updatedContacts);
+      
+      // Remove from pending
+      removePendingHandshake(handshake.id);
+      
+      addLog(`✅ Handshake accepted from ${handshake.sender.slice(0, 8)}...: "${responseMessage}"`);
+    } catch (error) {
+      console.error("Failed to accept handshake:", error);
+      addLog(`❌ Failed to accept handshake: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
 
-            if (logRef.current) {
-                const timestamp = new Date().toLocaleTimeString();
-                logRef.current.value += `[${timestamp}] ✅ Responded to handshake from ${handshake.sender}: "${responseMessage}"\n`;
-                logRef.current.scrollTop = logRef.current.scrollHeight;
-            }
-        } catch (error) {
-            console.error('Failed to accept handshake:', error);
-            if (logRef.current) {
-                const timestamp = new Date().toLocaleTimeString();
-                const errorMessage = error instanceof Error ? error.message : String(error);
-                logRef.current.value += `[${timestamp}] ❌ Failed to accept handshake: ${errorMessage}\n`;
-                logRef.current.scrollTop = logRef.current.scrollHeight;
-            }
-        }
-    }, [walletClient, ready, respondToIncomingHandshake, address]);
+  // Send message to established contact - FIXED: Use addMessage from hook
+  const sendMessageToContact = async (contact: Contact, messageText: string) => {
+    if (!contract || !address || !contact.pubKey) {
+      addLog("❌ Contact not established or missing data");
+      return;
+    }
 
-    const handleMessageSent = (result: any) => {
-        if (logRef.current) {
-            const timestamp = new Date().toLocaleTimeString();
-            const messageType = result.type === 'handshake_initiated' ? 'Handshake initiated' : 'Message sent';
-            logRef.current.value += `[${timestamp}] ✓ ${messageType}\n`;
-            logRef.current.scrollTop = logRef.current.scrollHeight;
-        }
-    };
+    setLoading(true);
+    try {
+      const topic = keccak256(toUtf8Bytes(`chat:${contact.address}`));
+      const timestamp = Math.floor(Date.now() / 1000);
+      
+      await sendEncryptedMessage({
+        contract: contract as any,
+        topic,
+        message: messageText,
+        recipientPubKey: contact.pubKey,
+        senderAddress: address,
+        senderSignKeyPair: senderSignKeyPair.current,
+        timestamp
+      });
+      
+      // Add to messages using hook function
+      const newMessage = {
+        id: `${Date.now()}-${Math.random()}`,
+        content: messageText,
+        sender: address,
+        timestamp: Date.now(),
+        type: 'outgoing' as const
+      };
+      
+      addMessage(newMessage);
+      
+      addLog(`📤 Message sent to ${contact.address.slice(0, 8)}...: "${messageText}"`);
+    } catch (error) {
+      console.error("Failed to send message:", error);
+      addLog(`❌ Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const handleError = (error: any) => {
-        console.error("Failed to send message:", error);
-        if (logRef.current) {
-            const timestamp = new Date().toLocaleTimeString();
-            logRef.current.value += `[${timestamp}] ✗ Error: ${error.message || error}\n`;
-            logRef.current.scrollTop = logRef.current.scrollHeight;
-        }
-    };
-
-    const StatusBadge = ({ status, children }: { status: 'success' | 'warning' | 'error', children: React.ReactNode }) => {
-        const colors = {
-            success: 'bg-green-100 text-green-800 border-green-200',
-            warning: 'bg-yellow-100 text-yellow-800 border-yellow-200', 
-            error: 'bg-red-100 text-red-800 border-red-200'
-        };
-        return (
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${colors[status]}`}>
-                {children}
-            </span>
-        );
-    };
-
-    return (
-        <div className="min-h-screen bg-gray-50">
-            {/* HEADER CON LOGO E TITOLO */}
-            <header className="bg-white border-b border-gray-200">
-                <div className="max-w-7xl mx-auto px-4 py-4 flex justify-between items-center">
-                    <div className="flex items-center space-x-3">
-                        <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center">
-                            <span className="text-white font-bold text-sm">V</span>
-                        </div>
-                        <h1 className="text-xl font-semibold text-gray-900">VerbEth</h1>
-                        <span className="text-sm text-gray-500">Demo</span>
-                    </div>
-                    <ConnectButton />
-                </div>
-            </header>
-
-            {/* MAIN: layout a tre colonne quando una conversazione è aperta */}
-            <main className="max-w-7xl mx-auto px-4 py-8">
-                <div className={`grid gap-6 ${openConversation ? 'grid-cols-1 lg:grid-cols-3' : 'grid-cols-1 lg:grid-cols-2'}`}>
-                    {/* LEFT COLUMN */}
-                    <div className="space-y-6">
-                        {/* STATUS */}
-                        <div className="bg-white rounded-xl border border-gray-200 p-6">
-                            <h2 className="text-lg font-semibold text-gray-900 mb-4">Connection Status</h2>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="flex flex-col space-y-2">
-                                    <span className="text-sm font-medium text-gray-500">RPC Connection</span>
-                                    <StatusBadge status={readProvider ? 'success' : 'error'}>
-                                        {readProvider ? 'Connected' : 'Disconnected'}
-                                    </StatusBadge>
-                                </div>
-                                <div className="flex flex-col space-y-2">
-                                    <span className="text-sm font-medium text-gray-500">Wallet</span>
-                                    <StatusBadge status={isConnected ? 'success' : 'error'}>
-                                        {isConnected ? 'Connected' : 'Disconnected'}
-                                    </StatusBadge>
-                                </div>
-                            </div>
-                            {address && (
-                                <div className="mt-6 pt-4 border-t border-gray-100">
-                                    <span className="text-sm font-medium text-gray-500">Connected Address</span>
-                                    <p className="mt-1 font-mono text-sm text-gray-900 break-all bg-gray-50 p-2 rounded-lg">
-                                        {address}
-                                    </p>
-                                </div>
-                            )}
-                        </div>
-
-                        {/* PENDING HANDSHAKES SECTION */}
-                        {pendingHandshakes.length > 0 && (
-                            <div className="bg-yellow-50 rounded-xl border border-yellow-200 p-6">
-                                <h2 className="text-lg font-semibold text-yellow-900 mb-4">
-                                    🤝 Pending Handshakes ({pendingHandshakes.length})
-                                </h2>
-                                <div className="space-y-4">
-                                    {pendingHandshakes.map((handshake) => (
-                                        <HandshakeCard 
-                                            key={`${handshake.transactionHash}-${handshake.blockNumber}`}
-                                            handshake={handshake}
-                                            onAccept={acceptHandshake}
-                                        />
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                        {/* CONVERSATION LIST */}
-                        <ConversationList
-                            selectedRecipient={selectedRecipient}
-                            onRecipientSelect={(recipient) => {
-                                setSelectedRecipient(recipient);
-                                // Open conversation view if recipient selected
-                                if (recipient) {
-                                    setOpenConversation(recipient);
-                                }
-                            }}
-                        />
-                    </div>
-
-                    {/* MIDDLE COLUMN - Conversation View */}
-                    {openConversation && ready && address && walletClient && (
-                        <div className="lg:col-span-1">
-                            <ConversationViewWrapper
-                                senderAddress={address}
-                                senderSignKeyPair={senderSign}
-                                recipientAddress={openConversation}
-                                walletClient={walletClient}
-                                onClose={() => setOpenConversation(null)}
-                                onError={handleError}
-                            />
-                        </div>
-                    )}
-
-                    {/* RIGHT COLUMN - Legacy messaging + Log */}
-                    <div className="space-y-6">
-                        {/* LEGACY MESSAGING (solo se non c'è conversazione aperta) */}
-                        {!openConversation && (
-                            <>
-                                {selectedRecipient && ready && address && walletClient ? (
-                                    <MessageInputWrapper
-                                        senderAddress={address}
-                                        senderSignKeyPair={senderSign}
-                                        recipientAddress={selectedRecipient}
-                                        walletClient={walletClient}
-                                        onMessageSent={handleMessageSent}
-                                        onError={handleError}
-                                        disabled={!ready}
-                                    />
-                                ) : (
-                                    <div className="bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 p-6 text-center">
-                                        <p className="text-gray-600">
-                                            {!ready ? "Connect wallet and wait for RPC connection to start messaging" : "Select a recipient to start messaging"}
-                                        </p>
-                                    </div>
-                                )}
-                            </>
-                        )}
-
-                        {/* LOG */}
-                        <div className="bg-white rounded-xl border border-gray-200 p-6">
-                            <h2 className="text-lg font-semibold text-gray-900 mb-4">Transaction Log</h2>
-                            <div className="relative">
-                                <textarea
-                                    ref={logRef}
-                                    className="w-full h-48 px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 font-mono text-sm resize-none outline-none"
-                                    placeholder="Transaction logs will appear here..."
-                                    readOnly
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </main>
+  return (
+    <div className="min-h-screen bg-black text-white p-4">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="flex justify-between items-center mb-8 border-b border-gray-800 pb-4">
+          <h1 className="text-2xl font-bold">VerbEth Demo</h1>
+          <ConnectButton />
         </div>
-    );
+
+        {!ready ? (
+          <div className="text-center py-16">
+            <p className="text-gray-400 text-lg">
+              {!isConnected ? "Please connect your wallet" : "Initializing..."}
+            </p>
+            {isInitialLoading && (
+              <div className="mt-4 flex items-center justify-center gap-2">
+                <div className="animate-spin w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full"></div>
+                <span className="text-blue-400">Loading recent messages...</span>
+                {syncProgress && (
+                  <span className="text-sm">({syncProgress.current}/{syncProgress.total})</span>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left Panel - Handshake */}
+            <div className="space-y-6">
+              <div className="border border-gray-800 rounded-lg p-4">
+                <h2 className="text-lg font-semibold mb-4">Start Handshake</h2>
+                <div className="space-y-3">
+                  <input
+                    type="text"
+                    placeholder="Recipient address (0x...)"
+                    value={recipientAddress}
+                    onChange={(e) => setRecipientAddress(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-white"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Message"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-white"
+                  />
+                  <button
+                    onClick={sendHandshake}
+                    disabled={loading || !recipientAddress || !message}
+                    className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded font-medium"
+                  >
+                    {loading ? "Sending..." : "Send Handshake"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Pending Handshakes */}
+              {pendingHandshakes.length > 0 && (
+                <div className="border border-gray-800 rounded-lg p-4">
+                  <h2 className="text-lg font-semibold mb-4">Pending Handshakes</h2>
+                  <div className="space-y-3">
+                    {pendingHandshakes.map((handshake) => (
+                      <div key={handshake.id} className="bg-gray-900 p-3 rounded">
+                        <div className="flex justify-between items-start mb-2">
+                          <span className="text-sm text-gray-400">
+                            From: {handshake.sender.slice(0, 8)}...
+                          </span>
+                          <span className="text-xs">
+                            {handshake.verified ? '✅' : '⚠️'}
+                          </span>
+                        </div>
+                        <p className="text-sm mb-2">"{handshake.message}"</p>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Response message"
+                            className="flex-1 px-2 py-1 bg-gray-800 border border-gray-600 rounded text-xs"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                acceptHandshake(handshake, e.currentTarget.value);
+                                e.currentTarget.value = '';
+                              }
+                            }}
+                          />
+                          <button
+                            onClick={() => {
+                              const input = document.querySelector(`input[placeholder="Response message"]`) as HTMLInputElement;
+                              if (input?.value) {
+                                acceptHandshake(handshake, input.value);
+                                input.value = '';
+                              }
+                            }}
+                            className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-xs"
+                          >
+                            Accept
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Middle Panel - Contacts */}
+            <div className="border border-gray-800 rounded-lg p-4">
+              <h2 className="text-lg font-semibold mb-4">Contacts</h2>
+              <div className="space-y-2">
+                {contacts.map((contact) => (
+                  <div
+                    key={contact.address}
+                    onClick={() => setSelectedContact(contact)}
+                    className={`p-3 rounded cursor-pointer transition-colors ${
+                      selectedContact?.address === contact.address
+                        ? 'bg-blue-900'
+                        : 'bg-gray-900 hover:bg-gray-800'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm font-medium">
+                        {contact.address.slice(0, 8)}...
+                      </span>
+                      <span className={`text-xs px-2 py-1 rounded ${
+                        contact.status === 'established' 
+                          ? 'bg-green-800 text-green-200'
+                          : contact.status === 'handshake_sent'
+                          ? 'bg-yellow-800 text-yellow-200'
+                          : 'bg-gray-700 text-gray-300'
+                      }`}>
+                        {contact.status.replace('_', ' ')}
+                      </span>
+                    </div>
+                    {contact.lastMessage && (
+                      <p className="text-xs text-gray-400 mt-1">
+                        "{contact.lastMessage.slice(0, 30)}..."
+                      </p>
+                    )}
+                  </div>
+                ))}
+                {contacts.length === 0 && (
+                  <p className="text-gray-400 text-sm text-center py-4">
+                    No contacts yet. Start a handshake to add contacts.
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Right Panel - Conversation */}
+            <div className="border border-gray-800 rounded-lg p-4 flex flex-col h-96">
+              <h2 className="text-lg font-semibold mb-4">
+                {selectedContact ? `Chat with ${selectedContact.address.slice(0, 8)}...` : 'Select a contact'}
+              </h2>
+              
+              {selectedContact ? (
+                <>
+                  {/* Load More History Button */}
+                  {canLoadMore && (
+                    <div className="text-center mb-2">
+                      <button
+                        onClick={loadMoreHistory}
+                        disabled={isLoadingMore}
+                        className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded"
+                      >
+                        {isLoadingMore ? (
+                          <div className="flex items-center gap-2">
+                            <div className="animate-spin w-3 h-3 border border-gray-400 border-t-transparent rounded-full"></div>
+                            <span>Loading...</span>
+                            {syncProgress && <span>({syncProgress.current}/{syncProgress.total})</span>}
+                          </div>
+                        ) : (
+                          "Load More History"
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Messages */}
+                  <div className="flex-1 overflow-y-auto space-y-2 mb-4">
+                    {messages
+                      .filter(m => 
+                        m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
+                        (m.type === 'outgoing' && selectedContact)
+                      )
+                      .map((msg) => (
+                        <div
+                          key={msg.id}
+                          className={`p-2 rounded max-w-xs ${
+                            msg.type === 'outgoing'
+                              ? 'bg-blue-600 ml-auto'
+                              : msg.type === 'system'
+                              ? 'bg-gray-700 mx-auto text-center text-xs'
+                              : 'bg-gray-700'
+                          }`}
+                        >
+                          <p className="text-sm">{msg.content}</p>
+                          <span className="text-xs text-gray-300">
+                            {new Date(msg.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      ))}
+                    {messages.filter(m => 
+                      m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
+                      (m.type === 'outgoing' && selectedContact)
+                    ).length === 0 && (
+                      <p className="text-gray-400 text-sm text-center py-8">
+                        No messages yet. {selectedContact.status === 'established' ? 'Start the conversation!' : 'Complete the handshake first.'}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Message Input */}
+                  {selectedContact.status === 'established' && (
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Type a message..."
+                        className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded text-white"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                            sendMessageToContact(selectedContact, e.currentTarget.value.trim());
+                            e.currentTarget.value = '';
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          const input = document.querySelector('input[placeholder="Type a message..."]') as HTMLInputElement;
+                          if (input?.value.trim()) {
+                            sendMessageToContact(selectedContact, input.value.trim());
+                            input.value = '';
+                          }
+                        }}
+                        disabled={loading}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 rounded"
+                      >
+                        Send
+                      </button>
+                    </div>
+                  )}
+
+                  {selectedContact.status !== 'established' && (
+                    <div className="text-center py-4 text-gray-400 text-sm">
+                      Handshake required before sending messages
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="flex-1 flex items-center justify-center text-gray-400">
+                  Select a contact to start messaging
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Activity Log */}
+        <div className="mt-8 border border-gray-800 rounded-lg p-4">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-lg font-semibold">Activity Log</h2>
+            {(isInitialLoading || isLoadingMore) && (
+              <div className="flex items-center gap-2 text-sm text-blue-400">
+                <div className="animate-spin w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full"></div>
+                <span>{isInitialLoading ? 'Initial sync...' : 'Loading more...'}</span>
+                {syncProgress && (
+                  <span>({syncProgress.current}/{syncProgress.total})</span>
+                )}
+              </div>
+            )}
+          </div>
+          <textarea
+            ref={logRef}
+            readOnly
+            className="w-full h-32 bg-gray-900 border border-gray-700 rounded p-2 text-sm font-mono text-gray-300 resize-none"
+            placeholder="Activity will appear here..."
+          />
+        </div>
+
+        {/* Debug Info */}
+        <div className="mt-4 text-xs text-gray-500 space-y-1">
+          <p>Contract: {LOGCHAIN_ADDR}</p>
+          <p>Network: Base</p>
+          <p>Contract creation block: {CONTRACT_CREATION_BLOCK}</p>
+          <p>Status: {ready ? '🟢 Ready' : '🔴 Not Ready'} {(isInitialLoading || isLoadingMore) ? '⏳ Loading' : ''}</p>
+          <p>Scanning: Lazy pagination with smart chunking ({EVENTS_PER_CHUNK} events/chunk)</p>
+          <p>Load more available: {canLoadMore ? '✅' : '❌'}</p>
+        </div>
+      </div>
+    </div>
+  );
 }

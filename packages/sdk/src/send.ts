@@ -91,7 +91,7 @@ export async function initiateHandshake({
   const serializedPayload = serializeHandshakeContent(handshakeContent);
 
 
-  await contract.initiateHandshake(
+  return await contract.initiateHandshake(
     recipientHash,
     hexlify(identityPubKey), 
     hexlify(ephemeralPubKey),

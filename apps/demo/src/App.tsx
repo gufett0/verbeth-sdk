@@ -4,7 +4,7 @@ import { useAccount, useWalletClient } from 'wagmi';
 import { useRpcProvider } from './rpc';
 import { Contract, BrowserProvider, keccak256, toUtf8Bytes, hexlify } from "ethers";
 import nacl from "tweetnacl";
-import { 
+import {
   sendEncryptedMessage,
   encryptStructuredPayload,
   initiateHandshake,
@@ -40,7 +40,7 @@ export default function App() {
   const readProvider = useRpcProvider();
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
-  
+
   // State
   const [ready, setReady] = useState(false);
   const [contract, setContract] = useState<Contract | null>(null);
@@ -49,10 +49,10 @@ export default function App() {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
-  
+
   // Refs
   const logRef = useRef<HTMLTextAreaElement>(null);
-  
+
   // Demo keys - in production, derive from wallet
   const senderSignKeyPair = useRef(nacl.sign.keyPair());
   const myIdentityKey = useRef<Uint8Array | null>(null);
@@ -105,7 +105,7 @@ export default function App() {
         // Derive identity key from wallet - simplified for demo
         // In reality, this should be derived from wallet signature
         myIdentityKey.current = nacl.box.keyPair().publicKey; // Placeholder
-        
+
         addLog("✅ Contract initialized and ready");
       } catch (error) {
         console.error("Failed to initialize contract:", error);
@@ -152,7 +152,7 @@ export default function App() {
     }
   }, []);
 
-  // FIXED: Use correct SDK initiateHandshake function signature
+  // Use correct SDK initiateHandshake function signature
   const sendHandshake = async () => {
     if (!contract || !address || !recipientAddress || !message || !myIdentityKey.current) {
       addLog("❌ Missing required data for handshake");
@@ -163,30 +163,30 @@ export default function App() {
     try {
       // Generate ephemeral keypair for this handshake
       const ephemeralKeyPair = nacl.box.keyPair();
-      
-      // Use correct SDK function signature
+
+      // FIX: Ora l'SDK ritorna la transaction
       const tx = await initiateHandshake({
         contract: contract as any,
-        recipientAddress,  // Correct parameter name
+        recipientAddress,
         identityPubKey: myIdentityKey.current,
         ephemeralPubKey: ephemeralKeyPair.publicKey,
-        plaintextPayload: message  // Correct parameter name
+        plaintextPayload: message
       });
-      
+
       // Add to contacts
       const newContact: Contact = {
         address: recipientAddress,
         status: 'handshake_sent',
         ephemeralKey: ephemeralKeyPair.secretKey, // Store for decrypting response
-        topic: tx.hash, // Store tx hash for tracking
+        topic: tx.hash, // Ora tx.hash è disponibile dal SDK
         lastMessage: message,
         lastTimestamp: Date.now()
       };
-      
+
       const updatedContacts = [...contacts.filter(c => c.address !== recipientAddress), newContact];
       saveContacts(updatedContacts);
-      
-      addLog(`📤 Handshake sent to ${recipientAddress.slice(0, 8)}...: "${message}"`);
+
+      addLog(`📤 Handshake sent to ${recipientAddress.slice(0, 8)}...: "${message}" (tx: ${tx.hash})`);
       setMessage("");
     } catch (error) {
       console.error("Failed to send handshake:", error);
@@ -196,7 +196,7 @@ export default function App() {
     }
   };
 
-  // FIXED: Use SDK encryptStructuredPayload function
+  // Use SDK encryptStructuredPayload function
   const acceptHandshake = async (handshake: any, responseMessage: string) => {
     if (!contract || !address || !myIdentityKey.current) {
       addLog("❌ Missing required data for handshake response");
@@ -205,13 +205,13 @@ export default function App() {
 
     try {
       const responderEphemeralKeyPair = nacl.box.keyPair();
-      
+
       const responseContent: HandshakeResponseContent = {
         identityPubKey: myIdentityKey.current,
         ephemeralPubKey: responderEphemeralKeyPair.publicKey,
         note: responseMessage
       };
-      
+
       // Use SDK function for encrypting response
       const encryptedResponse = encryptStructuredPayload(
         responseContent,
@@ -219,12 +219,12 @@ export default function App() {
         responderEphemeralKeyPair.secretKey,
         responderEphemeralKeyPair.publicKey
       );
-      
+
       const tx = await contract.respondToHandshake(
         handshake.id,
         toUtf8Bytes(encryptedResponse)
       );
-      
+
       // Add to contacts
       const newContact: Contact = {
         address: handshake.sender,
@@ -233,13 +233,13 @@ export default function App() {
         lastMessage: responseMessage,
         lastTimestamp: Date.now()
       };
-      
+
       const updatedContacts = [...contacts.filter(c => c.address !== handshake.sender), newContact];
       saveContacts(updatedContacts);
-      
+
       // Remove from pending
       removePendingHandshake(handshake.id);
-      
+
       addLog(`✅ Handshake accepted from ${handshake.sender.slice(0, 8)}...: "${responseMessage}"`);
     } catch (error) {
       console.error("Failed to accept handshake:", error);
@@ -258,7 +258,7 @@ export default function App() {
     try {
       const topic = keccak256(toUtf8Bytes(`chat:${contact.address}`));
       const timestamp = Math.floor(Date.now() / 1000);
-      
+
       await sendEncryptedMessage({
         contract: contract as any,
         topic,
@@ -268,7 +268,7 @@ export default function App() {
         senderSignKeyPair: senderSignKeyPair.current,
         timestamp
       });
-      
+
       // Add to messages using hook function
       const newMessage = {
         id: `${Date.now()}-${Math.random()}`,
@@ -277,9 +277,9 @@ export default function App() {
         timestamp: Date.now(),
         type: 'outgoing' as const
       };
-      
+
       addMessage(newMessage);
-      
+
       addLog(`📤 Message sent to ${contact.address.slice(0, 8)}...: "${messageText}"`);
     } catch (error) {
       console.error("Failed to send message:", error);
@@ -400,23 +400,21 @@ export default function App() {
                   <div
                     key={contact.address}
                     onClick={() => setSelectedContact(contact)}
-                    className={`p-3 rounded cursor-pointer transition-colors ${
-                      selectedContact?.address === contact.address
-                        ? 'bg-blue-900'
-                        : 'bg-gray-900 hover:bg-gray-800'
-                    }`}
+                    className={`p-3 rounded cursor-pointer transition-colors ${selectedContact?.address === contact.address
+                      ? 'bg-blue-900'
+                      : 'bg-gray-900 hover:bg-gray-800'
+                      }`}
                   >
                     <div className="flex justify-between items-center">
                       <span className="text-sm font-medium">
                         {contact.address.slice(0, 8)}...
                       </span>
-                      <span className={`text-xs px-2 py-1 rounded ${
-                        contact.status === 'established' 
-                          ? 'bg-green-800 text-green-200'
-                          : contact.status === 'handshake_sent'
+                      <span className={`text-xs px-2 py-1 rounded ${contact.status === 'established'
+                        ? 'bg-green-800 text-green-200'
+                        : contact.status === 'handshake_sent'
                           ? 'bg-yellow-800 text-yellow-200'
                           : 'bg-gray-700 text-gray-300'
-                      }`}>
+                        }`}>
                         {contact.status.replace('_', ' ')}
                       </span>
                     </div>
@@ -440,7 +438,7 @@ export default function App() {
               <h2 className="text-lg font-semibold mb-4">
                 {selectedContact ? `Chat with ${selectedContact.address.slice(0, 8)}...` : 'Select a contact'}
               </h2>
-              
+
               {selectedContact ? (
                 <>
                   {/* Load More History Button */}
@@ -467,20 +465,19 @@ export default function App() {
                   {/* Messages */}
                   <div className="flex-1 overflow-y-auto space-y-2 mb-4">
                     {messages
-                      .filter(m => 
+                      .filter(m =>
                         m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
                         (m.type === 'outgoing' && selectedContact)
                       )
                       .map((msg) => (
                         <div
                           key={msg.id}
-                          className={`p-2 rounded max-w-xs ${
-                            msg.type === 'outgoing'
-                              ? 'bg-blue-600 ml-auto'
-                              : msg.type === 'system'
+                          className={`p-2 rounded max-w-xs ${msg.type === 'outgoing'
+                            ? 'bg-blue-600 ml-auto'
+                            : msg.type === 'system'
                               ? 'bg-gray-700 mx-auto text-center text-xs'
                               : 'bg-gray-700'
-                          }`}
+                            }`}
                         >
                           <p className="text-sm">{msg.content}</p>
                           <span className="text-xs text-gray-300">
@@ -488,14 +485,14 @@ export default function App() {
                           </span>
                         </div>
                       ))}
-                    {messages.filter(m => 
+                    {messages.filter(m =>
                       m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
                       (m.type === 'outgoing' && selectedContact)
                     ).length === 0 && (
-                      <p className="text-gray-400 text-sm text-center py-8">
-                        No messages yet. {selectedContact.status === 'established' ? 'Start the conversation!' : 'Complete the handshake first.'}
-                      </p>
-                    )}
+                        <p className="text-gray-400 text-sm text-center py-8">
+                          No messages yet. {selectedContact.status === 'established' ? 'Start the conversation!' : 'Complete the handshake first.'}
+                        </p>
+                      )}
                   </div>
 
                   {/* Message Input */}

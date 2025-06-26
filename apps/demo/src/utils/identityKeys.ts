@@ -1,4 +1,4 @@
-// CREA QUESTO FILE: apps/demo/src/utils/identityKeys.ts
+// apps/demo/src/utils/identityKeys.ts
 
 import { sha256 } from '@noble/hashes/sha256';
 import { hkdf } from '@noble/hashes/hkdf';
@@ -6,12 +6,16 @@ import { Signer } from 'ethers';
 import nacl from 'tweetnacl';
 
 interface IdentityKeyPair {
+  // X25519 keys per encryption/decryption
   publicKey: Uint8Array;
   secretKey: Uint8Array;
+  // Ed25519 keys per signing/verification
+  signingPublicKey: Uint8Array;
+  signingSecretKey: Uint8Array;
 }
 
 /**
- * Derives a deterministic X25519 keypair from an Ethereum wallet
+ * Derives deterministic X25519 + Ed25519 keypairs from an Ethereum wallet
  * Uses HKDF (RFC 5869) for secure key derivation from wallet signature
  */
 export async function deriveIdentityKeyPair(signer: Signer, address: string): Promise<IdentityKeyPair> {
@@ -21,7 +25,9 @@ export async function deriveIdentityKeyPair(signer: Signer, address: string): Pr
     const parsed = JSON.parse(cached);
     return {
       publicKey: new Uint8Array(parsed.publicKey),
-      secretKey: new Uint8Array(parsed.secretKey)
+      secretKey: new Uint8Array(parsed.secretKey),
+      signingPublicKey: new Uint8Array(parsed.signingPublicKey),
+      signingSecretKey: new Uint8Array(parsed.signingSecretKey)
     };
   }
 
@@ -31,20 +37,35 @@ export async function deriveIdentityKeyPair(signer: Signer, address: string): Pr
   
   // Use HKDF for secure key derivation
   const ikm = sha256(signature);                                    // Input Key Material
-  const salt = new Uint8Array(32);                                 // Empty salt (can be customized)
-  const info = new TextEncoder().encode("verbeth-x25519-v1");      // Domain separation
-  const keyMaterial = hkdf(sha256, ikm, salt, info, 32);           // Derive 32 bytes for X25519
+  const salt = new Uint8Array(32);                                 // Empty salt
   
-  const keyPair = nacl.box.keyPair.fromSecretKey(keyMaterial);
+  // Derive X25519 keys for encryption
+  const info_x25519 = new TextEncoder().encode("verbeth-x25519-v1");
+  const keyMaterial_x25519 = hkdf(sha256, ikm, salt, info_x25519, 32);  // 32 bytes for X25519
+  const boxKeyPair = nacl.box.keyPair.fromSecretKey(keyMaterial_x25519);
+  
+  // Derive Ed25519 keys for signing
+  const info_ed25519 = new TextEncoder().encode("verbeth-ed25519-v1");
+  const keyMaterial_ed25519 = hkdf(sha256, ikm, salt, info_ed25519, 32); // 32 bytes for Ed25519 seed
+  const signKeyPair = nacl.sign.keyPair.fromSeed(keyMaterial_ed25519);
+  
+  const result = {
+    publicKey: boxKeyPair.publicKey,
+    secretKey: boxKeyPair.secretKey,
+    signingPublicKey: signKeyPair.publicKey,
+    signingSecretKey: signKeyPair.secretKey
+  };
   
   // Cache in localStorage
   const toCache = {
-    publicKey: Array.from(keyPair.publicKey),
-    secretKey: Array.from(keyPair.secretKey)
+    publicKey: Array.from(result.publicKey),
+    secretKey: Array.from(result.secretKey),
+    signingPublicKey: Array.from(result.signingPublicKey),
+    signingSecretKey: Array.from(result.signingSecretKey)
   };
   localStorage.setItem(`verbeth_identity_${address.toLowerCase()}`, JSON.stringify(toCache));
   
-  return keyPair;
+  return result;
 }
 
 /**

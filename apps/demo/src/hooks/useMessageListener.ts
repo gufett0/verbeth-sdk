@@ -70,7 +70,6 @@ interface UseMessageListenerProps {
   address: string | undefined;
   contacts: Contact[];
   identityKeyPair: { publicKey: Uint8Array; secretKey: Uint8Array } | null;
-  senderSignKeyPair: nacl.SignKeyPair;
   onContactsUpdate: (contacts: Contact[]) => void;
   onLog: (message: string) => void;
 }
@@ -80,7 +79,6 @@ export const useMessageListener = ({
   address,
   contacts,
   identityKeyPair,
-  senderSignKeyPair,
   onContactsUpdate,
   onLog,
 }: UseMessageListenerProps) => {
@@ -351,7 +349,7 @@ export const useMessageListener = ({
     }
   };
 
-  // Process handshake log - FIXED: usa SDK functions e senderSignKeyPair
+  // Process handshake log 
   const processHandshakeLog = async (log: any) => {
     try {
       const abiCoder = new AbiCoder();
@@ -379,11 +377,10 @@ export const useMessageListener = ({
         plaintextPayload: handshakeContent.plaintextPayload,
       };
 
-      // FIXED: Usa senderSignKeyPair per verificare identità
       let isVerified = false;
       try {
         const tx = await readProvider.getTransaction(log.transactionHash);
-        if (tx?.serialized && senderSignKeyPair) {
+        if (tx?.serialized && identityKeyPair) {
           isVerified = await verifyHandshakeIdentity(
             handshakeEvent,
             tx.serialized
@@ -463,7 +460,6 @@ export const useMessageListener = ({
         return;
       }
 
-      // FIXED: Usa senderSignKeyPair per verificare identità
       let isVerified = false;
       try {
         const tx = await readProvider.getTransaction(log.transactionHash);
@@ -530,9 +526,9 @@ export const useMessageListener = ({
 
       // ✅ USA identityKeyPair invece di myIdentityKey
       if (!identityKeyPair) {
-        onLog(`❌ Missing identity key pair for decryption`);
-        return;
-      }
+          onLog(`⏳ Identity key not ready yet, skipping message from ${sender.slice(0, 8)}...`);
+          return;
+        }
 
       const ciphertextJson = new TextDecoder().decode(
         hexToUint8Array(ciphertextBytes)
@@ -543,6 +539,7 @@ export const useMessageListener = ({
         ciphertextJson,
         identityKeyPair.secretKey, 
         contact.pubKey 
+        //undefined                     // ⭐ IGNORA firma per ora, fino a che non scambiamo signing keys
       );
 
       if (decryptedMessage) {
@@ -748,12 +745,13 @@ export const useMessageListener = ({
     if (
       readProvider &&
       address &&
+      identityKeyPair && 
       !isInitialLoading &&
       scanChunks.current.length === 0
     ) {
       performInitialScan();
     }
-  }, [readProvider, address, performInitialScan]);
+  }, [readProvider, address, identityKeyPair, performInitialScan]); 
 
   return {
     messages,

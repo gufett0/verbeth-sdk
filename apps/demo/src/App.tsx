@@ -48,19 +48,17 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [contract, setContract] = useState<Contract | null>(null);
   const [recipientAddress, setRecipientAddress] = useState("");
-  const [identityKeyPair, setIdentityKeyPair] = useState<{ publicKey: Uint8Array, secretKey: Uint8Array } | null>(null);
-  const [message, setMessage] = useState("");
+  const [identityKeyPair, setIdentityKeyPair] = useState<{
+    publicKey: Uint8Array,
+    secretKey: Uint8Array,
+    signingPublicKey: Uint8Array,
+    signingSecretKey: Uint8Array
+  } | null>(null); const [message, setMessage] = useState("");
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
-
-
-
   // Refs
   const logRef = useRef<HTMLTextAreaElement>(null);
-
-  // Demo keys - in production, derive from wallet
-  const senderSignKeyPair = useRef(nacl.sign.keyPair());
 
   useEffect(() => {
     setReady(readProvider !== null && isConnected && walletClient !== undefined);
@@ -74,7 +72,9 @@ export default function App() {
           addLog("🔑 Deriving identity key from wallet...");
           const keyPair = await deriveIdentityKeyPair(signer, address);
           setIdentityKeyPair(keyPair);
-          addLog(`✅ Identity key derived: ${Buffer.from(keyPair.publicKey).toString('hex').slice(0, 16)}...`);
+          addLog(`✅ Identity key derived:`);
+          addLog(`  📦 X25519: ${Buffer.from(keyPair.publicKey).toString('hex').slice(0, 16)}...`);
+          addLog(`  ✍️ Ed25519: ${Buffer.from(keyPair.signingPublicKey).toString('hex').slice(0, 16)}...`);
         } catch (error) {
           console.error("Failed to derive identity key:", error);
           addLog(`❌ Failed to derive identity key: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -110,33 +110,32 @@ export default function App() {
     address,
     contacts,
     identityKeyPair: identityKeyPair,
-    senderSignKeyPair: senderSignKeyPair.current,
     onContactsUpdate: (newContacts) => setContacts(newContacts),
     onLog: addLog
   });
 
   // Initialize contract and identity key
   useEffect(() => {
-  if (!ready || !readProvider || !walletClient || !address) return;
+    if (!ready || !readProvider || !walletClient || !address) return;
 
-  const initContract = async () => {
-    try {
-      const ethersProvider = new BrowserProvider(walletClient.transport);
-      const ethersSigner = await ethersProvider.getSigner();  
-      const contractInstance = new Contract(LOGCHAIN_ADDR, LOGCHAIN_ABI, ethersSigner);
-      
-      setContract(contractInstance);
-      setSigner(ethersSigner); 
+    const initContract = async () => {
+      try {
+        const ethersProvider = new BrowserProvider(walletClient.transport);
+        const ethersSigner = await ethersProvider.getSigner();
+        const contractInstance = new Contract(LOGCHAIN_ADDR, LOGCHAIN_ABI, ethersSigner);
 
-      addLog("✅ Contract initialized and ready");
-    } catch (error) {
-      console.error("Failed to initialize contract:", error);
-      addLog("❌ Failed to initialize contract");
-    }
-  };
+        setContract(contractInstance);
+        setSigner(ethersSigner);
 
-  initContract();
-}, [ready, readProvider, walletClient, address]);
+        addLog("✅ Contract initialized and ready");
+      } catch (error) {
+        console.error("Failed to initialize contract:", error);
+        addLog("❌ Failed to initialize contract");
+      }
+    };
+
+    initContract();
+  }, [ready, readProvider, walletClient, address]);
 
   // Load contacts from localStorage
   useEffect(() => {
@@ -225,9 +224,9 @@ export default function App() {
       const responderEphemeralKeyPair = nacl.box.keyPair();
 
       const responseContent: HandshakeResponseContent = {
-        identityPubKey: identityKeyPair.publicKey, 
+        identityPubKey: identityKeyPair.publicKey,
         ephemeralPubKey: responderEphemeralKeyPair.publicKey,
-        note: responseMessage
+        note: responseMessage,
       };
 
       // Use SDK function for encrypting response
@@ -267,7 +266,7 @@ export default function App() {
 
   // Send message to established contact - FIXED: Use addMessage from hook
   const sendMessageToContact = async (contact: Contact, messageText: string) => {
-    if (!contract || !address || !contact.pubKey) {
+    if (!contract || !address || !contact.pubKey || !identityKeyPair) {
       addLog("❌ Contact not established or missing data");
       return;
     }
@@ -277,13 +276,18 @@ export default function App() {
       const topic = keccak256(toUtf8Bytes(`chat:${contact.address}`));
       const timestamp = Math.floor(Date.now() / 1000);
 
+      const identityAsSigningKey = {
+      publicKey: identityKeyPair.signingPublicKey,  // ⭐ Ed25519 public key (64 bytes)
+      secretKey: identityKeyPair.signingSecretKey   // ⭐ Ed25519 secret key (64 bytes)
+    };
+
       await sendEncryptedMessage({
         contract: contract as any,
         topic,
         message: messageText,
         recipientPubKey: contact.pubKey,
         senderAddress: address,
-        senderSignKeyPair: senderSignKeyPair.current,
+        senderSignKeyPair: identityAsSigningKey,
         timestamp
       });
 

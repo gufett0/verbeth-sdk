@@ -13,8 +13,6 @@ import {
 const LOGCHAIN_ADDR = "0xf9fe7E57459CC6c42791670FaD55c1F548AE51E8";
 const CONTRACT_CREATION_BLOCK = 30568313;
 const INITIAL_SCAN_BLOCKS = 10000; // Ultimi 10k blocchi per caricamento iniziale
-//const EVENTS_PER_CHUNK = 20; // Target eventi per chunk in lazy pagination
-//const CONCURRENCY = 3;
 const MAX_RETRIES = 3;
 const MAX_RANGE_PROVIDER = 2000; // Range massimo per provider RPC
 const CHUNK_SIZE = 2000; // Dimensione chunk per smart chunking ( se == a MAX_RANGE_PROVIDER allora 1 chunk == 1 chiamata RPC)
@@ -71,7 +69,7 @@ interface UseMessageListenerProps {
   readProvider: any;
   address: string | undefined;
   contacts: Contact[];
-  myIdentityKey: Uint8Array | null;
+  identityKeyPair: { publicKey: Uint8Array; secretKey: Uint8Array } | null;
   senderSignKeyPair: nacl.SignKeyPair;
   onContactsUpdate: (contacts: Contact[]) => void;
   onLog: (message: string) => void;
@@ -81,7 +79,7 @@ export const useMessageListener = ({
   readProvider,
   address,
   contacts,
-  myIdentityKey,
+  identityKeyPair,
   senderSignKeyPair,
   onContactsUpdate,
   onLog,
@@ -530,23 +528,21 @@ export const useMessageListener = ({
         return;
       }
 
-      // FIXED: Usa myIdentityKey derivata dal wallet invece di generare random
-      if (!myIdentityKey) {
-        onLog(`❌ Missing identity key for decryption`);
+      // ✅ USA identityKeyPair invece di myIdentityKey
+      if (!identityKeyPair) {
+        onLog(`❌ Missing identity key pair for decryption`);
         return;
       }
-
-      // Converti myIdentityKey (Ed25519) in chiave X25519 per box decryption
-      // Per ora uso la stessa chiave, in produzione serve conversione appropriata
-      const myBoxSecretKey = myIdentityKey.slice(0, 32); // Simplified conversion
 
       const ciphertextJson = new TextDecoder().decode(
         hexToUint8Array(ciphertextBytes)
       );
+
+      // ✅ USA la chiave privata dell'identità per decifrare MessageSent
       const decryptedMessage = decryptMessage(
         ciphertextJson,
-        myBoxSecretKey,
-        contact.pubKey
+        identityKeyPair.secretKey, 
+        contact.pubKey 
       );
 
       if (decryptedMessage) {
@@ -729,9 +725,9 @@ export const useMessageListener = ({
           lastKnownBlock.current = maxSafeBlock;
 
           console.log(
-              `🔄 Real-time scan updated to block ${maxSafeBlock} (last known: ${startScanBlock})`
-            );
-            console.log(`Processed ${events.length} new events`);
+            `🔄 Real-time scan updated to block ${maxSafeBlock} (last known: ${startScanBlock})`
+          );
+          console.log(`Processed ${events.length} new events`);
 
           if (events.length > 0) {
             onLog(

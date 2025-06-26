@@ -11,6 +11,8 @@ import {
   HandshakeResponseContent
 } from '@verbeth/sdk';
 import { useMessageListener } from './hooks/useMessageListener';
+import { deriveIdentityKeyPair } from './utils/identityKeys';
+
 
 // Constants
 const LOGCHAIN_ABI = [
@@ -39,26 +41,49 @@ export default function App() {
   const readProvider = useRpcProvider();
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
+  const [signer, setSigner] = useState<any>(null);
+
 
   // State
   const [ready, setReady] = useState(false);
   const [contract, setContract] = useState<Contract | null>(null);
   const [recipientAddress, setRecipientAddress] = useState("");
+  const [identityKeyPair, setIdentityKeyPair] = useState<{ publicKey: Uint8Array, secretKey: Uint8Array } | null>(null);
   const [message, setMessage] = useState("");
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
+
+
 
   // Refs
   const logRef = useRef<HTMLTextAreaElement>(null);
 
   // Demo keys - in production, derive from wallet
   const senderSignKeyPair = useRef(nacl.sign.keyPair());
-  const myIdentityKey = useRef<Uint8Array | null>(null);
 
   useEffect(() => {
     setReady(readProvider !== null && isConnected && walletClient !== undefined);
   }, [readProvider, isConnected, walletClient]);
+
+
+  useEffect(() => {
+    const initializeIdentityKey = async () => {
+      if (address && signer) {
+        try {
+          addLog("🔑 Deriving identity key from wallet...");
+          const keyPair = await deriveIdentityKeyPair(signer, address);
+          setIdentityKeyPair(keyPair);
+          addLog(`✅ Identity key derived: ${Buffer.from(keyPair.publicKey).toString('hex').slice(0, 16)}...`);
+        } catch (error) {
+          console.error("Failed to derive identity key:", error);
+          addLog(`❌ Failed to derive identity key: ${error instanceof Error ? error.message : 'Unknown error'}`);
+        }
+      }
+    };
+
+    initializeIdentityKey();
+  }, [address, signer]);
 
   // Helper functions
   const addLog = (message: string) => {
@@ -84,7 +109,7 @@ export default function App() {
     readProvider,
     address,
     contacts,
-    myIdentityKey: myIdentityKey.current,
+    identityKeyPair: identityKeyPair,
     senderSignKeyPair: senderSignKeyPair.current,
     onContactsUpdate: (newContacts) => setContacts(newContacts),
     onLog: addLog
@@ -92,32 +117,26 @@ export default function App() {
 
   // Initialize contract and identity key
   useEffect(() => {
-    if (!ready || !readProvider || !walletClient || !address) return;
+  if (!ready || !readProvider || !walletClient || !address) return;
 
-    const initContract = async () => {
-      try {
-        const ethersProvider = new BrowserProvider(walletClient.transport);
-        const signer = await ethersProvider.getSigner();
-        const contractInstance = new Contract(LOGCHAIN_ADDR, LOGCHAIN_ABI, signer);
-        setContract(contractInstance);
+  const initContract = async () => {
+    try {
+      const ethersProvider = new BrowserProvider(walletClient.transport);
+      const ethersSigner = await ethersProvider.getSigner();  
+      const contractInstance = new Contract(LOGCHAIN_ADDR, LOGCHAIN_ABI, ethersSigner);
+      
+      setContract(contractInstance);
+      setSigner(ethersSigner); 
 
-        // Derive identity key from wallet - simplified for demo
-        // In reality, this should be derived from wallet signature
-        myIdentityKey.current = nacl.box.keyPair().publicKey; // Placeholder
-
-        addLog("✅ Contract initialized and ready");
-      } catch (error) {
-        console.error("Failed to initialize contract:", error);
-        addLog("❌ Failed to initialize contract");
-      }
-    };
-
-    initContract();
-  }, [ready, readProvider, walletClient, address]);
-
-  const calculateRecipientHash = (recipientAddr: string) => {
-    return keccak256(toUtf8Bytes(`contact:${recipientAddr.toLowerCase()}`));
+      addLog("✅ Contract initialized and ready");
+    } catch (error) {
+      console.error("Failed to initialize contract:", error);
+      addLog("❌ Failed to initialize contract");
+    }
   };
+
+  initContract();
+}, [ready, readProvider, walletClient, address]);
 
   // Load contacts from localStorage
   useEffect(() => {
@@ -153,7 +172,7 @@ export default function App() {
 
   // Use correct SDK initiateHandshake function signature
   const sendHandshake = async () => {
-    if (!contract || !address || !recipientAddress || !message || !myIdentityKey.current) {
+    if (!contract || !address || !recipientAddress || !message || !identityKeyPair) {
       addLog("❌ Missing required data for handshake");
       return;
     }
@@ -167,7 +186,7 @@ export default function App() {
       const tx = await initiateHandshake({
         contract: contract as any,
         recipientAddress,
-        identityPubKey: myIdentityKey.current,
+        identityPubKey: identityKeyPair.publicKey,
         ephemeralPubKey: ephemeralKeyPair.publicKey,
         plaintextPayload: message
       });
@@ -176,8 +195,8 @@ export default function App() {
       const newContact: Contact = {
         address: recipientAddress,
         status: 'handshake_sent',
-        ephemeralKey: ephemeralKeyPair.secretKey, // Store for decrypting response
-        topic: tx.hash, // Ora tx.hash è disponibile dal SDK
+        ephemeralKey: ephemeralKeyPair.secretKey,
+        topic: tx.hash,
         lastMessage: message,
         lastTimestamp: Date.now()
       };
@@ -197,7 +216,7 @@ export default function App() {
 
   // Use SDK encryptStructuredPayload function
   const acceptHandshake = async (handshake: any, responseMessage: string) => {
-    if (!contract || !address || !myIdentityKey.current) {
+    if (!contract || !address || !identityKeyPair) {
       addLog("❌ Missing required data for handshake response");
       return;
     }
@@ -206,7 +225,7 @@ export default function App() {
       const responderEphemeralKeyPair = nacl.box.keyPair();
 
       const responseContent: HandshakeResponseContent = {
-        identityPubKey: myIdentityKey.current,
+        identityPubKey: identityKeyPair.publicKey, 
         ephemeralPubKey: responderEphemeralKeyPair.publicKey,
         note: responseMessage
       };

@@ -18,6 +18,7 @@ const INITIAL_SCAN_BLOCKS = 10000; // Ultimi 10k blocchi per caricamento inizial
 const MAX_RETRIES = 3;
 const MAX_RANGE_PROVIDER = 2000; // Range massimo per provider RPC
 const CHUNK_SIZE = 2000; // Dimensione chunk per smart chunking ( se == a MAX_RANGE_PROVIDER allora 1 chunk == 1 chiamata RPC)
+const REAL_TIME_BUFFER = 3; // Buffer
 
 const EVENT_SIGNATURES = {
   MessageSent: keccak256(
@@ -194,14 +195,12 @@ export const useMessageListener = ({
     return [];
   };
 
-
   // Smart chunking: find optimal ranges with events
   const findEventRanges = async (
     fromBlock: number,
     toBlock: number
   ): Promise<[number, number][]> => {
     const ranges: [number, number][] = [];
-    
 
     let currentBlock = toBlock;
 
@@ -709,50 +708,35 @@ export const useMessageListener = ({
     }
   }, [readProvider, address, isLoadingMore, canLoadMore, onLog]);
 
-  // Real-time scanning for new blocks
+  // Real-time scanning for new blocks with safety buffer
   useEffect(() => {
     if (!readProvider || !address || !lastKnownBlock.current) return;
 
     const interval = setInterval(async () => {
       try {
         const currentBlock = await readProvider.getBlockNumber();
+        const maxSafeBlock = currentBlock - REAL_TIME_BUFFER; // Buffer per evitare blocchi non indicizzati
 
-        if (currentBlock > lastKnownBlock.current!) {
-          // Verifica "block is indexed"
-          let maxIndexedBlock = lastKnownBlock.current!;
+        if (maxSafeBlock > lastKnownBlock.current!) {
+          // Scansiona solo blocchi "sicuri" (non troppo freschi)
+          const startScanBlock = lastKnownBlock.current! + 1;
+          const events = await scanBlockRange(startScanBlock, maxSafeBlock);
 
-          // Trova il massimo blocco indicizzato partendo dal prossimo fino al currentBlock
-          for (let i = lastKnownBlock.current! + 1; i <= currentBlock; i++) {
-            const blk = await readProvider.getBlock(i);
-            if (blk) {
-              maxIndexedBlock = i;
-            } else {
-              // Appena ne trovi uno non indicizzato, ti fermi!
-              break;
-            }
+          for (const event of events) {
+            await processEvent(event);
           }
 
-          // Solo se abbiamo almeno un nuovo blocco indicizzato, scansioniamo
-          if (maxIndexedBlock > lastKnownBlock.current!) {
-            const events = await scanBlockRange(
-              lastKnownBlock.current! + 1,
-              maxIndexedBlock
-            );
-            for (const event of events) {
-              await processEvent(event);
-            }
-            lastKnownBlock.current = maxIndexedBlock;
-            console.log(
-              `🔄 Real-time scan updated to block ${maxIndexedBlock}`
+          lastKnownBlock.current = maxSafeBlock;
+
+          console.log(
+              `🔄 Real-time scan updated to block ${maxSafeBlock} (last known: ${startScanBlock})`
             );
             console.log(`Processed ${events.length} new events`);
-            if (events.length > 0) {
-              onLog(
-                `🔄 Found ${events.length} new events in blocks ${
-                  lastKnownBlock.current! + 1
-                }-${maxIndexedBlock}`
-              );
-            }
+
+          if (events.length > 0) {
+            onLog(
+              `🔄 Found ${events.length} new events in blocks ${startScanBlock}-${maxSafeBlock}`
+            );
           }
         }
       } catch (error) {

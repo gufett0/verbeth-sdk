@@ -24,7 +24,6 @@ const LOGCHAIN_ABI = [
 
 const LOGCHAIN_ADDR = "0xf9fe7E57459CC6c42791670FaD55c1F548AE51E8";
 const CONTRACT_CREATION_BLOCK = 30568313;
-const EVENTS_PER_CHUNK = 20; // For debug info display
 
 interface Contact {
   address: string;
@@ -590,8 +589,6 @@ export default function App() {
           <p>Network: Base</p>
           <p>Contract creation block: {CONTRACT_CREATION_BLOCK}</p>
           <p>Status: {ready ? '🟢 Ready' : '🔴 Not Ready'} {(isInitialLoading || isLoadingMore) ? '⏳ Loading' : ''}</p>
-          <p>Scanning: Lazy pagination with smart chunking ({EVENTS_PER_CHUNK} events/chunk)</p>
-          <p>Load more available: {canLoadMore ? '✅' : '❌'}</p>
         </div>
       </div>
     </div>

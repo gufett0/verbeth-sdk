@@ -543,7 +543,29 @@ export default function App() {
         {/* Activity Log */}
         <div className="mt-8 border border-gray-800 rounded-lg p-4">
           <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-semibold">Activity Log</h2>
+            <div className="flex items-center gap-4">
+              <h2 className="text-lg font-semibold">Activity Log</h2>
+              {/* Global Load More History Button */}
+              {canLoadMore && ready && (
+                <button
+                  onClick={loadMoreHistory}
+                  disabled={isLoadingMore}
+                  className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded flex items-center gap-2"
+                >
+                  {isLoadingMore ? (
+                    <>
+                      <div className="animate-spin w-3 h-3 border border-gray-400 border-t-transparent rounded-full"></div>
+                      <span>Loading blocks...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>📂</span>
+                      <span>Load More History</span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
             {(isInitialLoading || isLoadingMore) && (
               <div className="flex items-center gap-2 text-sm text-blue-400">
                 <div className="animate-spin w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full"></div>

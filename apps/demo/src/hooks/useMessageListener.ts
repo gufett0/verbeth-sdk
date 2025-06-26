@@ -13,10 +13,11 @@ import {
 const LOGCHAIN_ADDR = "0xf9fe7E57459CC6c42791670FaD55c1F548AE51E8";
 const CONTRACT_CREATION_BLOCK = 30568313;
 const INITIAL_SCAN_BLOCKS = 10000; // Ultimi 10k blocchi per caricamento iniziale
-const EVENTS_PER_CHUNK = 20; // Target eventi per chunk in lazy pagination
-const CONCURRENCY = 3;
+//const EVENTS_PER_CHUNK = 20; // Target eventi per chunk in lazy pagination
+//const CONCURRENCY = 3;
 const MAX_RETRIES = 3;
-const MAX_RANGE_PROVIDER = 2000; // e.g. https://base-rpc.publicnode.com
+const MAX_RANGE_PROVIDER = 2000; // Range massimo per provider RPC
+const CHUNK_SIZE = 2000; // Dimensione chunk per smart chunking ( se == a MAX_RANGE_PROVIDER allora 1 chunk == 1 chiamata RPC)
 
 const EVENT_SIGNATURES = {
   MessageSent: keccak256(
@@ -200,7 +201,7 @@ export const useMessageListener = ({
     toBlock: number
   ): Promise<[number, number][]> => {
     const ranges: [number, number][] = [];
-    const CHUNK_SIZE = 1000; // Range più grandi per evitare limiti RPC
+    
 
     let currentBlock = toBlock;
 

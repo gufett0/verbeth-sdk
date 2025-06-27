@@ -1,6 +1,7 @@
-// packages/sdk/src/payload.ts - Aggiornamenti per unified keys
+// packages/sdk/src/payload.ts
+import { DerivationProof } from './types'; 
 
-// ========== EXISTING INTERFACES (preserved) ==========
+// ========== INTERFACES ==========
 
 export interface EncryptedPayload {
   v: number; // version
@@ -28,7 +29,7 @@ export interface HandshakeResponsePayload extends EncryptedPayload {
 
 export interface HandshakeContent {
   plaintextPayload: string;
-  identityProof?: IdentityProof;
+  derivationProof: DerivationProof;  
 }
 
 // ========== EXISTING FUNCTIONS (preserved) ==========
@@ -40,7 +41,6 @@ export function parseHandshakePayload(plaintextPayload: string): HandshakeConten
       return parsed as HandshakeContent;
     }
   } catch (e) {
-    // Se fallisce il parsing, handshake non valido
   }
   
   throw new Error("Invalid handshake payload: missing derivationProof");
@@ -155,7 +155,7 @@ export interface HandshakeResponseContent {
   unifiedPubKeys: Uint8Array;      // 🆕 65 bytes: version + X25519 + Ed25519
   ephemeralPubKey: Uint8Array;
   note?: string;
-  identityProof?: IdentityProof;
+  derivationProof: DerivationProof;  
 }
 
 // Helper functions da aggiornare

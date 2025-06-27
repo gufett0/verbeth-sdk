@@ -27,27 +27,68 @@ they must emit a `Handshake` event. This allows the recipient to reply with thei
 If the recipient’s public key is already known (from a past `HandshakeResponse`, 
 on-chain announcement, or static mapping), the sender may skip the handshake.
 ```
-Alice (Initiator)                    Bob (Responder)
-├─ deriva X25519 + Ed25519          ├─ deriva X25519 + Ed25519
-│  da firma Ethereum                │  da firma Ethereum  
-│                                   │
-├─ Handshake Event ──────────────→  ├─ riceve handshake
-│  • X25519 identity key            │  • valida identity key
-│  • Ed25519 signing key            │  • salva entrambe le chiavi
-│  • ephemeral key                  │
-│  • plaintext payload              │
-│                                   │
-│ ←─────────────── HandshakeResponse├─ 
-│  • X25519 identity key            │
-│  • Ed25519 signing key            │
-│  • ephemeral key (encrypted)      │
-│  • note (encrypted)               │
-│                                   │
-├─ MessageSent ────────────────────→├─ riceve messaggio
-│  • encrypted con X25519           │  • decrypta con X25519
-│  • signed con Ed25519             │  • verifica con Ed25519 
+ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
+      |                            |                            |
+      |----------------------------|                            |
+      |  PHASE 1: Identity Key Derivation (Proof)               |
+      |--------------------------->|                            |
+      |  Sign derivation msg       |                            |
+      |  Derive unified keys       |                            |
+      |  Create DerivationProof    |                            |
+      |                            |<---------------------------|
+      |                            |  Bob: Sign/derive keys     |
+      |                            |  Create DerivationProof    |
+      |                            |                            |
+      |  PHASE 2: Alice Initiates Handshake                     |
+      |--------------------------->|                            |
+      |  Generate ephemeral keypair|                            |
+      |  Prepare HandshakeContent  |                            |
+      |  Encode unified pubKeys    |                            |
+      |  initiateHandshake()       |--------------------------->|
+      |                            |  Emit Handshake event      |
+      |                            |--------------------------->|
+      |                            |  PHASE 3: Bob Receives     |
+      |                            |  Listen for event          |
+      |                            |  Parse unified pubKeys     |
+      |                            |  Extract DerivationProof   |
+      |                            |  Verify Alice's identity   |
+      |                            |                            |
+      |                            |  PHASE 4: Bob Responds     |
+      |                            |--------------------------->|
+      |                            |  If valid:                 |
+      |                            |   - Generate ephemeral key |
+      |                            |   - Prepare response       |
+      |                            |   - Encrypt w/ Alice's key |
+      |                            |  respondToHandshake()      |
+      |                            |  Emit HandshakeResponse    |
+      |                            |--------------------------->|
+      |                            |  Else: reject handshake    |
+      |                            |                            |
+      |  PHASE 5: Alice Receives Response                       |
+      |<--------------------------|                             |
+      |  Listen for HandshakeResponse event                     |
+      |  Decrypt response w/ own ephemeral secret               |
+      |  Extract Bob's keys & proof                             |
+      |  Verify Bob's identity                                  |
+      |                                                         |
+      |  PHASE 6: Secure Communication Established              |
+      |--------------------------->|                            |
+      |  Store Bob's keys          |                            |
+      |  Ongoing:                  |                            |
+      |   - Encrypt w/ Bob's key   |                            |
+      |   - Sign w/ Alice's key    |                            |
+      |   - sendMessage()          |--------------------------->|
+      |                            |  Message event received    |
+      |                            |  Decrypt w/ Bob's key      |
+      |                            |  Verify signature          |
+      |                            |  Secure message delivered  |
+      |----------------------------|----------------------------|
+      |  Key Security:                                          |
+      |   - Forward Secrecy                                     |
+      |   - Identity Verification                               |
+      |   - Address Binding                                     |
+      |   - Unified Key Management                              |
 ```
-
 
 ## Features
 

@@ -1,4 +1,4 @@
-// packages/sdk/src/utils.ts - Solo derivation proof verification
+// packages/sdk/src/utils.ts
 
 import { 
   Contract,
@@ -53,11 +53,11 @@ export async function isSmartContract(
 }
 
 /**
- * 🆕 Verifies derivation proof and re-derives unified keys
+ * Verifies derivation proof and re-derives unified keys
  * This is the core verification function for the new unified keys system
  */
 export function verifyDerivationProof(
-  derivationProof: DerivationProof,  // 🆕 Using type from types.ts
+  derivationProof: DerivationProof,
   expectedSenderAddress: string,
   expectedUnifiedKeys: {
     identityPubKey: Uint8Array;
@@ -120,7 +120,7 @@ export function verifyDerivationProof(
 }
 
 /**
- * 🆕 Verifies derivation proof for EOA addresses
+ * Verifies derivation proof for EOA addresses
  * Uses ethers verifyMessage which supports EOA signature verification
  */
 export function verifyEOADerivationProof(
@@ -135,11 +135,11 @@ export function verifyEOADerivationProof(
 }
 
 /**
- * 🆕 Verifies derivation proof for Smart Account addresses
+ * Verifies derivation proof for Smart Account addresses
  * Uses EIP-1271 for smart contract signature verification
  */
 export async function verifySmartAccountDerivationProof(
-  derivationProof: DerivationProof,  // 🆕 Using type from types.ts
+  derivationProof: DerivationProof,  
   smartAccountAddress: string,
   expectedUnifiedKeys: {
     identityPubKey: Uint8Array;

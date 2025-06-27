@@ -1,5 +1,4 @@
-// packages/sdk/src/verify.ts - Mandatory derivation proof verification
-
+// packages/sdk/src/verify.ts
 import { 
   JsonRpcProvider
 } from "ethers";
@@ -15,28 +14,25 @@ import {
 // ============= Handshake Verification =============
 
 /**
- * 🆕 Simplified handshake verification with mandatory derivation proof
+ * handshake verification with mandatory derivation proof
  */
 export async function verifyHandshakeIdentity(
   handshakeEvent: HandshakeLog,
   provider: JsonRpcProvider
 ): Promise<boolean> {
   try {
-    // Parse handshake payload - now always requires derivationProof
+    // parse handshake payload - now always requires derivationProof
     const content = parseHandshakePayload(handshakeEvent.plaintextPayload);
     
-    // Extract unified keys from event
     const parsedKeys = parseHandshakeKeys(handshakeEvent);
     if (!parsedKeys) {
       console.error("Failed to parse unified pubKeys from handshake event");
       return false;
     }
     
-    // Check if sender is a smart contract
     const isContract = await isSmartContract(handshakeEvent.sender, provider);
     
     if (isContract) {
-      // Smart Account verification
       return await verifySmartAccountDerivationProof(
         content.derivationProof,
         handshakeEvent.sender,
@@ -44,7 +40,6 @@ export async function verifyHandshakeIdentity(
         provider
       );
     } else {
-      // EOA verification
       return verifyEOADerivationProof(
         content.derivationProof,
         handshakeEvent.sender,
@@ -87,7 +82,6 @@ export async function verifyHandshakeResponseIdentity(
       return false;
     }
 
-    // Check if responder is a smart contract
     const isContract = await isSmartContract(responseEvent.responder, provider);
     
     const expectedKeys = {
@@ -96,7 +90,6 @@ export async function verifyHandshakeResponseIdentity(
     };
     
     if (isContract) {
-      // Smart Account verification
       return await verifySmartAccountDerivationProof(
         extractedResponse.derivationProof,
         responseEvent.responder,
@@ -104,7 +97,6 @@ export async function verifyHandshakeResponseIdentity(
         provider
       );
     } else {
-      // EOA verification
       return verifyEOADerivationProof(
         extractedResponse.derivationProof,
         responseEvent.responder,
@@ -151,7 +143,7 @@ export async function verifyAndExtractHandshakeKeys(
 }
 
 /**
- * 🆕 Convenience function to verify handshake response and extract keys
+ * Convenience function to verify handshake response and extract keys
  */
 export async function verifyAndExtractHandshakeResponseKeys(
   responseEvent: HandshakeResponseLog,

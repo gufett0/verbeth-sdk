@@ -7,10 +7,8 @@ export * from './deduplication';
 export * from './utils';
 export * from './identity';
 
-// Convenience re-exports
 export { decryptMessage as decryptLog } from './crypto';
 
-// 🆕 New unified keys specific exports
 export {
   encodeUnifiedPubKeys,
   decodeUnifiedPubKeys,
@@ -27,7 +25,6 @@ export {
   decryptAndExtractHandshakeKeys
 } from './crypto';
 
-// 🆕 New derivation proof verification exports
 export {
   verifyDerivationProof,
   verifyEOADerivationProof,
@@ -39,7 +36,6 @@ export {
   verifyAndExtractHandshakeResponseKeys
 } from './verify';
 
-// 🆕 New identity derivation with proof
 export {
   deriveIdentityKeyPairWithProof
 } from './identity';

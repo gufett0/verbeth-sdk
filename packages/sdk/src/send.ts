@@ -1,4 +1,4 @@
-// packages/sdk/src/send.ts - Aggiornamenti per unified keys
+// packages/sdk/src/send.ts
 
 import { 
   keccak256,
@@ -15,7 +15,7 @@ import {
   encodeUnifiedPubKeys,
   createHandshakeResponseContent
 } from './payload';
-import { IdentityKeyPair, DerivationProof } from './types';  // 🆕 Import from types
+import { IdentityKeyPair, DerivationProof } from './types';  
 import nacl from 'tweetnacl';
 
 /**

@@ -2,12 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 import nacl from "tweetnacl";
 import { JsonRpcProvider } from "ethers";
 
-import { MessageDeduplicator } from "../src";
+import { MessageDeduplicator, sendEncryptedMessage } from "../src";
 import { getNextNonce } from "../src/utils/nonce";
 import { convertPublicKeyToX25519 } from "../src/utils/x25519";
-import { isSmartContract, verifyEIP1271Signature, sendEncryptedMessage } from "../src";
+import { 
+  isSmartContract, 
+  verifyEIP1271Signature 
+} from "../src/utils";  
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
-
 
 const fakeProvider = {
   async getCode(addr: string) {
@@ -21,20 +23,17 @@ const fakeProvider = {
   }
 } as unknown as JsonRpcProvider;
 
-//
 describe("MessageDeduplicator", () => {
   it("detects duplicates and enforces maxSize", () => {
     const dedup = new MessageDeduplicator(2);
-    expect(dedup.isDuplicate("A", "T", 1n)).toBe(false); // first time
-    expect(dedup.isDuplicate("A", "T", 1n)).toBe(true);  // duplicate
-    expect(dedup.isDuplicate("A", "T", 2n)).toBe(false); // new
-    expect(dedup.isDuplicate("A", "T", 3n)).toBe(false); // evicts 1
+    expect(dedup.isDuplicate("A", "T", 1n)).toBe(false); 
+    expect(dedup.isDuplicate("A", "T", 1n)).toBe(true); 
+    expect(dedup.isDuplicate("A", "T", 2n)).toBe(false); 
+    expect(dedup.isDuplicate("A", "T", 3n)).toBe(false); 
     expect(dedup.isDuplicate("A", "T", 1n)).toBe(false); // not duplicate anymore
   });
 });
 
-
-//
 describe("getNextNonce", () => {
   it("increments per (sender, topic) and returns bigint", () => {
     const n1 = getNextNonce("0xAlice", "topic");
@@ -45,8 +44,7 @@ describe("getNextNonce", () => {
   });
 });
 
-//
-describe("Utils", () => {
+describe("Utils Functions", () => {
   it("isSmartContract returns true for contract bytecode", async () => {
     expect(await isSmartContract("0xCc…Cc", fakeProvider)).toBe(true);
     expect(await isSmartContract("0xEe…Ee", fakeProvider)).toBe(false);
@@ -73,11 +71,11 @@ describe("Utils", () => {
   });
 });
 
-//
 describe("sendEncryptedMessage", () => {
   it("calls contract.sendMessage with expected parameters", async () => {
+    const mockSendMessage = vi.fn().mockResolvedValue("txHash");
     const fakeContract = {
-      sendMessage: vi.fn().mockResolvedValue("txHash"),
+      sendMessage: mockSendMessage,
     } as unknown as LogChainV1;
 
     const recipientKey = nacl.box.keyPair();
@@ -93,6 +91,58 @@ describe("sendEncryptedMessage", () => {
       timestamp: 42,
     });
 
-    expect(fakeContract.sendMessage).toHaveBeenCalledTimes(1);
+    expect(mockSendMessage).toHaveBeenCalledTimes(1);
+    
+    const callArgs = mockSendMessage.mock.calls[0];
+    expect(callArgs).toHaveLength(4); // ciphertext, topic, timestamp, nonce
+    expect(typeof callArgs[1]).toBe('string'); 
+    expect(typeof callArgs[2]).toBe('number'); 
+    expect(typeof callArgs[3]).toBe('bigint'); 
+  });
+
+  it("generates different nonces for different calls", async () => {
+    const mockSendMessage = vi.fn().mockResolvedValue("txHash");
+    const fakeContract = {
+      sendMessage: mockSendMessage,
+    } as unknown as LogChainV1;
+
+    const recipientKey = nacl.box.keyPair();
+    const senderSign = nacl.sign.keyPair();
+
+    // send two messages from same sender
+    await sendEncryptedMessage({
+      contract: fakeContract,
+      topic: "0x" + "ab".repeat(32),
+      message: "message 1",
+      recipientPubKey: recipientKey.publicKey,
+      senderAddress: "0xAlice",
+      senderSignKeyPair: senderSign,
+      timestamp: 42,
+    });
+
+    await sendEncryptedMessage({
+      contract: fakeContract,
+      topic: "0x" + "ab".repeat(32),
+      message: "message 2",
+      recipientPubKey: recipientKey.publicKey,
+      senderAddress: "0xAlice",
+      senderSignKeyPair: senderSign,
+      timestamp: 43,
+    });
+
+    expect(mockSendMessage).toHaveBeenCalledTimes(2);
+    
+    const firstNonce = mockSendMessage.mock.calls[0][3];
+    const secondNonce = mockSendMessage.mock.calls[1][3];
+    expect(secondNonce).toBe(firstNonce + 1n);
+  });
+});
+
+describe("Unified Keys Utilities", () => {
+  it("should handle unified key operations", () => {
+    // just verify the basic imports work
+    expect(typeof isSmartContract).toBe('function');
+    expect(typeof verifyEIP1271Signature).toBe('function');
+    expect(typeof sendEncryptedMessage).toBe('function');
   });
 });

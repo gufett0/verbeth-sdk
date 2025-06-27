@@ -14,8 +14,10 @@ import {
   encodeHandshakeResponseContent, 
   decodeHandshakeResponseContent,
   MessagePayload,
-  HandshakeResponseContent
+  HandshakeResponseContent,
+  encodeUnifiedPubKeys 
 } from '../src/payload';
+import { DerivationProof } from '../src/types';
 import type { LogMessage } from '../src/types';
 
 describe('Encryption/Decryption', () => {
@@ -117,14 +119,24 @@ describe('Encryption/Decryption', () => {
     it('should encrypt and decrypt handshake response content', () => {
       const initiatorEphemeralKey = nacl.box.keyPair();
       const responderEphemeralKey = nacl.box.keyPair();
+      
       const identityPubKey = new Uint8Array(32).fill(3);
+      const signingPubKey = new Uint8Array(32).fill(7);
+      const unifiedPubKeys = encodeUnifiedPubKeys(identityPubKey, signingPubKey);
+      
       const ephemeralPubKey = new Uint8Array(32).fill(4);
       const note = 'here is my response';
+      
+      const derivationProof: DerivationProof = {
+        message: 'VerbEth Identity Key Derivation v1\nAddress: 0x1234...',
+        signature: '0x' + '1'.repeat(130)
+      };
 
       const responseContent: HandshakeResponseContent = {
-        identityPubKey,
+        unifiedPubKeys,      
         ephemeralPubKey,
-        note
+        note,
+        derivationProof     
       };
 
       const encrypted = encryptStructuredPayload(
@@ -140,26 +152,32 @@ describe('Encryption/Decryption', () => {
       );
 
       expect(decrypted).not.toBeNull();
-      expect(decrypted!.identityPubKey).toEqual(identityPubKey);
+      expect(decrypted!.unifiedPubKeys).toEqual(unifiedPubKeys);  
       expect(decrypted!.ephemeralPubKey).toEqual(ephemeralPubKey);
       expect(decrypted!.note).toBe(note);
+      expect(decrypted!.derivationProof).toEqual(derivationProof); 
     });
 
-    it('should handle handshake response with identity proof', () => {
+    it('should handle handshake response with derivation proof', () => {
       const initiatorEphemeralKey = nacl.box.keyPair();
       const responderEphemeralKey = nacl.box.keyPair();
+      
       const identityPubKey = new Uint8Array(32).fill(5);
+      const signingPubKey = new Uint8Array(32).fill(8);
+      const unifiedPubKeys = encodeUnifiedPubKeys(identityPubKey, signingPubKey);
+      
       const ephemeralPubKey = new Uint8Array(32).fill(6);
-      const identityProof = {
-        signature: '0x' + '1'.repeat(130),
-        message: '0x' + '2'.repeat(64)
+      
+      const derivationProof: DerivationProof = {
+        message: 'VerbEth Identity Key Derivation v1\nAddress: 0xabcd...',
+        signature: '0x' + '2'.repeat(130)
       };
 
       const responseContent: HandshakeResponseContent = {
-        identityPubKey,
+        unifiedPubKeys,    
         ephemeralPubKey,
-        note: 'with proof',
-        identityProof
+        note: 'with derivation proof',
+        derivationProof      
       };
 
       const encrypted = encryptStructuredPayload(
@@ -175,14 +193,18 @@ describe('Encryption/Decryption', () => {
       );
 
       expect(decrypted).not.toBeNull();
-      expect(decrypted!.identityProof).toEqual(identityProof);
+      expect(decrypted!.derivationProof).toEqual(derivationProof);  
     });
   });
 
   describe('Payload Encoding/Decoding', () => {
     it('should encode and decode handshake payload correctly', () => {
+      const identityPubKey = new Uint8Array(32).fill(1);
+      const signingPubKey = new Uint8Array(32).fill(9);
+      const unifiedPubKeys = encodeUnifiedPubKeys(identityPubKey, signingPubKey);
+      
       const payload: HandshakePayload = {
-        identityPubKey: new Uint8Array(32).fill(1),
+        unifiedPubKeys,     
         ephemeralPubKey: new Uint8Array(32).fill(2),
         plaintextPayload: 'hello bob'
       };
@@ -190,28 +212,38 @@ describe('Encryption/Decryption', () => {
       const encoded = encodeHandshakePayload(payload);
       const decoded = decodeHandshakePayload(encoded);
 
-      expect(decoded.identityPubKey).toEqual(payload.identityPubKey);
+      expect(decoded.unifiedPubKeys).toEqual(payload.unifiedPubKeys);  
       expect(decoded.ephemeralPubKey).toEqual(payload.ephemeralPubKey);
       expect(decoded.plaintextPayload).toBe('hello bob');
     });
 
     it('should encode and decode response content correctly', () => {
       const identityPubKey = new Uint8Array(32).fill(3);
+      const signingPubKey = new Uint8Array(32).fill(10);
+      const unifiedPubKeys = encodeUnifiedPubKeys(identityPubKey, signingPubKey);
+      
       const ephemeralPubKey = new Uint8Array(32).fill(4);
       const note = 'here is my response';
+      
+      const derivationProof: DerivationProof = {
+        message: 'VerbEth Identity Key Derivation v1\nAddress: 0xtest...',
+        signature: '0x' + '3'.repeat(130)
+      };
 
       const content: HandshakeResponseContent = {
-        identityPubKey,
+        unifiedPubKeys,      
         ephemeralPubKey,
-        note
+        note,
+        derivationProof    
       };
 
       const encoded = encodeHandshakeResponseContent(content);
       const decoded = decodeHandshakeResponseContent(encoded);
 
-      expect(decoded.identityPubKey).toEqual(identityPubKey);
+      expect(decoded.unifiedPubKeys).toEqual(unifiedPubKeys); 
       expect(decoded.ephemeralPubKey).toEqual(ephemeralPubKey);
       expect(decoded.note).toBe(note);
+      expect(decoded.derivationProof).toEqual(derivationProof);  
     });
   });
 

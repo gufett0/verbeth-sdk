@@ -1,4 +1,4 @@
-// packages/sdk/src/crypto.ts - Aggiornamenti per unified keys
+// packages/sdk/src/crypto.ts
 
 import nacl from 'tweetnacl';
 import { 

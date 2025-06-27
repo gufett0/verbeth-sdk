@@ -1,4 +1,4 @@
-// packages/sdk/src/types.ts - Clean interfaces for unified keys system
+// packages/sdk/src/types.ts
 
 export interface LogMessage {
   sender: string;

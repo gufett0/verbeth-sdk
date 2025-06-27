@@ -26,6 +26,11 @@ const config: HardhatUserConfig = {
       accounts: [`${process.env.PRIVATE_KEY}`],
       timeout: 60000,
     },
+    base: {
+      url: "https://1rpc.io/base",
+      accounts: [`${process.env.PRIVATE_KEY}`],
+      timeout: 60000,
+    },
     localhost: {
       url: "http://127.0.0.1:8545", 
       timeout: 60000,

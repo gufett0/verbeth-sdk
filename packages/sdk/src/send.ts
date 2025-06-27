@@ -44,7 +44,7 @@ export async function sendEncryptedMessage({
 
   const nonce = getNextNonce(senderAddress, topic);
 
-  return contract.sendMessage(ciphertext, topic, timestamp, nonce);
+  return contract.sendMessage(toUtf8Bytes(ciphertext), topic, timestamp, nonce);
 }
 
 /**
@@ -91,7 +91,7 @@ export async function initiateHandshake({
   const serializedPayload = serializeHandshakeContent(handshakeContent);
 
 
-  await contract.initiateHandshake(
+  return await contract.initiateHandshake(
     recipientHash,
     hexlify(identityPubKey), 
     hexlify(ephemeralPubKey),

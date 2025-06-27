@@ -26,6 +26,27 @@ they must emit a `Handshake` event. This allows the recipient to reply with thei
 
 If the recipient’s public key is already known (from a past `HandshakeResponse`, 
 on-chain announcement, or static mapping), the sender may skip the handshake.
+```
+Alice (Initiator)                    Bob (Responder)
+├─ deriva X25519 + Ed25519          ├─ deriva X25519 + Ed25519
+│  da firma Ethereum                │  da firma Ethereum  
+│                                   │
+├─ Handshake Event ──────────────→  ├─ riceve handshake
+│  • X25519 identity key            │  • valida identity key
+│  • Ed25519 signing key            │  • salva entrambe le chiavi
+│  • ephemeral key                  │
+│  • plaintext payload              │
+│                                   │
+│ ←─────────────── HandshakeResponse├─ 
+│  • X25519 identity key            │
+│  • Ed25519 signing key            │
+│  • ephemeral key (encrypted)      │
+│  • note (encrypted)               │
+│                                   │
+├─ MessageSent ────────────────────→├─ riceve messaggio
+│  • encrypted con X25519           │  • decrypta con X25519
+│  • signed con Ed25519             │  • verifica con Ed25519 
+```
 
 
 ## Features

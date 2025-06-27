@@ -29,6 +29,7 @@ const CONTRACT_CREATION_BLOCK = 30568313;
 
 interface Contact {
   address: string;
+  signingPubKey?: Uint8Array;
   pubKey?: Uint8Array;
   ephemeralKey?: Uint8Array;
   topic?: string;
@@ -243,11 +244,18 @@ export default function App() {
         toUtf8Bytes(encryptedResponse)
       );
 
+        addLog(`🔍 Accepting handshake - signingKey: ${handshake.signingPubKey ? 'YES' : 'NO'}`);
+  if (handshake.signingPubKey) {
+    addLog(`🔍 Signing key: ${Buffer.from(handshake.signingPubKey).toString('hex').slice(0, 16)}...`);
+  }
+
+
       // Add to contacts
       const newContact: Contact = {
         address: handshake.sender,
         status: 'established',
         pubKey: handshake.identityPubKey,
+        signingPubKey: handshake.signingPubKey, 
         lastMessage: responseMessage,
         lastTimestamp: Date.now()
       };

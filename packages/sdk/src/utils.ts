@@ -3,7 +3,9 @@
 import { 
   Contract,
   JsonRpcProvider,
-  verifyMessage
+  verifyMessage,
+  keccak256, 
+  toUtf8Bytes  
 } from "ethers";
 import { sha256 } from '@noble/hashes/sha256';
 import { hkdf } from '@noble/hashes/hkdf';
@@ -149,7 +151,7 @@ export async function verifySmartAccountDerivationProof(
 ): Promise<boolean> {
   try {
     // 1. Verify using EIP-1271
-    const messageHash = derivationProof.message; // Assuming message is already a hash
+    const messageHash = keccak256(toUtf8Bytes(derivationProof.message));
     const isValidSignature = await verifyEIP1271Signature(
       smartAccountAddress,
       messageHash,

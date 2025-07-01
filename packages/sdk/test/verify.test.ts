@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import {
   Wallet,
   HDNodeWallet,
@@ -14,7 +14,7 @@ import { hkdf } from "@noble/hashes/hkdf";
 import {
   verifyEOADerivationProof,
   verifySmartAccountDerivationProof,
-  isSmartContract,
+  isSmartContract
 } from "../src/utils";
 import {
   verifyHandshakeIdentity,
@@ -31,7 +31,7 @@ import {
   HandshakeLog,
   HandshakeResponseLog,
 } from "../src/types";
-import { deriveIdentityKeyPairWithProof } from "../src/identity";
+import { deriveIdentityKeyPairWithProof, deriveIdentityWithUnifiedKeys } from "../src/identity";
 
 const mockProvider = {
   async getCode(address: string) {
@@ -43,33 +43,12 @@ const mockProvider = {
   },
 } as unknown as JsonRpcProvider;
 
-async function createSDKDerivationProof(wallet: HDNodeWallet): Promise<{
-  derivationProof: DerivationProof;
-  identityPubKey: Uint8Array;
-  signingPubKey: Uint8Array;
-  unifiedPubKeys: Uint8Array;
-}> {
-  const result = await deriveIdentityKeyPairWithProof(wallet, wallet.address);
-
-  const unifiedPubKeys = encodeUnifiedPubKeys(
-    result.keyPair.publicKey, // X25519
-    result.keyPair.signingPublicKey // Ed25519
-  );
-
-  return {
-    derivationProof: result.derivationProof,
-    identityPubKey: result.keyPair.publicKey,
-    signingPubKey: result.keyPair.signingPublicKey,
-    unifiedPubKeys,
-  };
-}
-
 describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
   describe("EOA Derivation Proof Verification", () => {
     it("verifyEOADerivationProof - OK with correct unified keys", async () => {
       const wallet: HDNodeWallet = Wallet.createRandom();
       const { derivationProof, identityPubKey, signingPubKey } =
-        await createSDKDerivationProof(wallet);
+        await deriveIdentityWithUnifiedKeys(wallet, wallet.address);
 
       const result = verifyEOADerivationProof(derivationProof, wallet.address, {
         identityPubKey,
@@ -83,7 +62,7 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
       const wallet1: HDNodeWallet = Wallet.createRandom();
       const wallet2: HDNodeWallet = Wallet.createRandom();
       const { derivationProof, identityPubKey, signingPubKey } =
-        await createSDKDerivationProof(wallet1);
+        await deriveIdentityWithUnifiedKeys(wallet1, wallet1.address);
 
       const result = verifyEOADerivationProof(
         derivationProof,
@@ -96,7 +75,7 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
 
     it("verifyEOADerivationProof - KO with wrong keys", async () => {
       const wallet: HDNodeWallet = Wallet.createRandom();
-      const { derivationProof } = await createSDKDerivationProof(wallet);
+      const { derivationProof } = await deriveIdentityWithUnifiedKeys(wallet, wallet.address);
 
       const wrongKeys = {
         identityPubKey: new Uint8Array(32).fill(0xaa),
@@ -174,7 +153,7 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
     it("verifyHandshakeIdentity - EOA flow with unified keys", async () => {
       const wallet: HDNodeWallet = Wallet.createRandom();
       const { derivationProof, unifiedPubKeys } =
-        await createSDKDerivationProof(wallet);
+        await deriveIdentityWithUnifiedKeys(wallet, wallet.address);
 
       const handshakeEvent: HandshakeLog = {
         recipientHash: keccak256(toUtf8Bytes("contact:0xdead")),
@@ -196,7 +175,7 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
 
     it("verifyHandshakeIdentity - fails with invalid derivation proof", async () => {
       const wallet: HDNodeWallet = Wallet.createRandom();
-      const { unifiedPubKeys } = await createSDKDerivationProof(wallet);
+      const { unifiedPubKeys } = await deriveIdentityWithUnifiedKeys(wallet, wallet.address);
 
       // create invalid derivation proof with different wallet signature
       const differentWallet: HDNodeWallet = Wallet.createRandom();
@@ -233,7 +212,7 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
     it("verifyHandshakeResponseIdentity - EOA flow with unified keys", async () => {
       const responderWallet: HDNodeWallet = Wallet.createRandom();
       const { derivationProof, identityPubKey, unifiedPubKeys } =
-        await createSDKDerivationProof(responderWallet);
+        await deriveIdentityWithUnifiedKeys(responderWallet, responderWallet.address);
 
       const aliceEphemeral = nacl.box.keyPair(); // initiator
       const responderEphemeral = nacl.box.keyPair();
@@ -271,7 +250,7 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
     it("verifyHandshakeResponseIdentity - fails with wrong identity key", async () => {
       const responderWallet: HDNodeWallet = Wallet.createRandom();
       const { derivationProof, unifiedPubKeys } =
-        await createSDKDerivationProof(responderWallet);
+        await deriveIdentityWithUnifiedKeys(responderWallet, responderWallet.address);
 
       const aliceEphemeral = nacl.box.keyPair();
       const responderEphemeral = nacl.box.keyPair();

@@ -37,5 +37,6 @@ export {
 } from './verify';
 
 export {
-  deriveIdentityKeyPairWithProof
+  deriveIdentityKeyPairWithProof,
+  deriveIdentityWithUnifiedKeys
 } from './identity';

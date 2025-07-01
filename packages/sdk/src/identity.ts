@@ -2,6 +2,8 @@ import { sha256 } from '@noble/hashes/sha256';
 import { hkdf } from '@noble/hashes/hkdf';
 import { Signer } from 'ethers';
 import nacl from 'tweetnacl';
+import { encodeUnifiedPubKeys } from './payload';
+import { DerivationProof } from './types';
 
 interface IdentityKeyPair {
   // X25519 keys per encryption/decryption
@@ -64,5 +66,29 @@ export async function deriveIdentityKeyPairWithProof(signer: Signer, address: st
       message,
       signature
     }
+  };
+}
+
+export async function deriveIdentityWithUnifiedKeys(
+  signer: Signer, 
+  address: string
+): Promise<{
+  derivationProof: DerivationProof;
+  identityPubKey: Uint8Array;
+  signingPubKey: Uint8Array;
+  unifiedPubKeys: Uint8Array;
+}> {
+  const result = await deriveIdentityKeyPairWithProof(signer, address);
+
+  const unifiedPubKeys = encodeUnifiedPubKeys(
+    result.keyPair.publicKey,        // X25519
+    result.keyPair.signingPublicKey  // Ed25519
+  );
+
+  return {
+    derivationProof: result.derivationProof,
+    identityPubKey: result.keyPair.publicKey,
+    signingPubKey: result.keyPair.signingPublicKey,
+    unifiedPubKeys,
   };
 }

@@ -1,60 +1,74 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
-import "@openzeppelin/contracts/interfaces/IERC1271.sol";
-
 /**
- * Test Smart Account for testing EIP-1271 signatures
+ * TestSmartAccount
+ * ----------------
+ * Minimal single-owner smart-account for local ERC-4337 tests.
+ *
+ * • Inherits   OpenZeppelin “community-contracts” Account,
+ *              which supplies nonce handling, validateUserOp(), etc.
+ * • Adds       SignerECDSA to reuse its _rawSignatureValidation helper.
+ * • Stores     the EntryPoint passed at deployment in an immutable variable.
  */
-contract TestSmartAccount is IERC1271 {
-    address public owner;
-    
-    constructor(address _owner) {
-        owner = _owner;
-    }
-    
+
+import "@openzeppelin/community-contracts/contracts/account/Account.sol";
+import "@openzeppelin/community-contracts/contracts/utils/cryptography/signers/SignerECDSA.sol";
+
+import "@openzeppelin/contracts/interfaces/IERC1271.sol";
+import "@openzeppelin/contracts/interfaces/draft-IERC4337.sol"; // IEntryPoint (draft till ERC is final)
+
+contract TestSmartAccount is Account, SignerECDSA {
+
+    /// EntryPoint that this account trusts (e.g. for local Anvil deployments)
+    IEntryPoint private immutable _entryPoint;
+
     /**
-     * EIP-1271 compliant signature validation
+     * @param ep      Address of the EntryPoint contract (local or live network)
+     * @param signer  EOA that will sign UserOps / messages for this account
      */
-    function isValidSignature(bytes32 hash, bytes calldata signature) 
-        external 
-        view 
-        override 
-        returns (bytes4) 
-    {
-
-        if (signature.length != 65) {
-            return 0xffffffff;
-        }
-        
-        uint8 v;
-        bytes32 r;
-        bytes32 s;
-        assembly {
-            r := calldataload(add(signature.offset, 0x00))
-            s := calldataload(add(signature.offset, 0x20))
-            v := byte(0, calldataload(add(signature.offset, 0x40)))
-        }
-        
-        address recovered = ecrecover(hash, v, r, s);
-        
-
-        if (recovered == owner && recovered != address(0)) {
-            return 0x1626ba7e;
-        } else {
-            return 0xffffffff;
-        }
+    constructor(IEntryPoint ep, address signer) {
+        _entryPoint = ep;        // remember the chosen EntryPoint
+        _setSigner(signer);      // helper from SignerECDSA (stores the owner)
     }
-    
-    function execute(address dest, uint256 value, bytes calldata func) 
-        external 
-        returns (bytes memory) 
-    {
-        require(msg.sender == owner, "not owner");
-        (bool success, bytes memory result) = dest.call{value: value}(func);
-        require(success, "call failed");
-        return result;
+
+
+    /**
+     * Called by EntryPoint.validateUserOp() to know which EntryPoint
+     * this account recognises.  Keeps the same visibility/signature
+     * as in OZ Account, therefore is marked `override`.
+     */
+    function entryPoint() public view override returns (IEntryPoint) {
+        return _entryPoint;
     }
-    
-    receive() external payable {}
+
+    /**
+     * Allows dApps or on-chain contracts to check a signature via ERC-1271.
+     * Returns the 4-byte “magic value” on success, 0xffffffff on failure.
+     */
+    function isValidSignature(bytes32 hash, bytes calldata sig)
+        public
+        view
+        returns (bytes4)
+    {
+        return _rawSignatureValidation(hash, sig)
+            ? IERC1271.isValidSignature.selector   // 0x1626ba7e
+            : bytes4(0xffffffff);                  // invalid signature
+    }
+
+    /**
+     * OZ `Account.validateSignature()` delegates here to convert
+     * an ECDSA signature into “validationData” (0 = OK).
+     *
+     * No `override` keyword needed in current OZ community‐contracts,
+     * because `_validateSignature()` is not declared `virtual` there.
+     * If a future version marks it `virtual`, simply add `override`.
+     */
+    function _validateSignature(bytes32 hash, bytes calldata sig)
+        internal
+        view
+        returns (uint256)
+    {
+        return _rawSignatureValidation(hash, sig) ? 0 : 1;
+    }
 }

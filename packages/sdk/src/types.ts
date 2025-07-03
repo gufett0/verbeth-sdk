@@ -38,6 +38,18 @@ export interface DerivationProof {
   signature: string;    // Ethereum signature of the message
 }
 
+export interface PackedUserOperation {
+  sender: string;
+  nonce: bigint;
+  initCode: string;
+  callData: string;
+  accountGasLimits: bigint;
+  preVerificationGas: bigint;
+  gasFees: bigint;
+  paymasterAndData: string;
+  signature: string;
+}
+
 // ========== NOTES ==========
 // 
 // Handshake parsing functions like parseHandshakeKeys() and 

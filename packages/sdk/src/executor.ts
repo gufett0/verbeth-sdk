@@ -1,12 +1,12 @@
 // packages/sdk/src/executor.ts
 
-import { 
-  Signer,
-  Contract,
-  Interface,
-  BaseContract
-} from "ethers";
+import { Signer, Contract, Interface, BaseContract } from "ethers";
+import type { PackedUserOperation } from "./types";
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
+
+function pack128x128(high: bigint, low: bigint): bigint {
+  return (high << 128n) | (low & ((1n << 128n) - 1n));
+}
 
 export interface IExecutor {
   sendMessage(
@@ -15,14 +15,14 @@ export interface IExecutor {
     timestamp: number,
     nonce: bigint
   ): Promise<any>;
-  
+
   initiateHandshake(
     recipientHash: string,
     pubKeys: string,
     ephemeralPubKey: string,
     plaintextPayload: Uint8Array
   ): Promise<any>;
-  
+
   respondToHandshake(
     inResponseTo: string,
     ciphertext: Uint8Array
@@ -76,7 +76,7 @@ export class UserOpExecutor implements IExecutor {
     this.logChainInterface = new Interface([
       "function sendMessage(bytes calldata ciphertext, bytes32 topic, uint256 timestamp, uint256 nonce)",
       "function initiateHandshake(bytes32 recipientHash, bytes pubKeys, bytes ephemeralPubKey, bytes plaintextPayload)",
-      "function respondToHandshake(bytes32 inResponseTo, bytes ciphertext)"
+      "function respondToHandshake(bytes32 inResponseTo, bytes ciphertext)",
     ]);
   }
 
@@ -90,7 +90,7 @@ export class UserOpExecutor implements IExecutor {
       ciphertext,
       topic,
       timestamp,
-      nonce
+      nonce,
     ]);
 
     return this.executeUserOp(callData);
@@ -102,12 +102,10 @@ export class UserOpExecutor implements IExecutor {
     ephemeralPubKey: string,
     plaintextPayload: Uint8Array
   ): Promise<any> {
-    const callData = this.logChainInterface.encodeFunctionData("initiateHandshake", [
-      recipientHash,
-      pubKeys,
-      ephemeralPubKey,
-      plaintextPayload
-    ]);
+    const callData = this.logChainInterface.encodeFunctionData(
+      "initiateHandshake",
+      [recipientHash, pubKeys, ephemeralPubKey, plaintextPayload]
+    );
 
     return this.executeUserOp(callData);
   }
@@ -116,33 +114,42 @@ export class UserOpExecutor implements IExecutor {
     inResponseTo: string,
     ciphertext: Uint8Array
   ): Promise<any> {
-    const callData = this.logChainInterface.encodeFunctionData("respondToHandshake", [
-      inResponseTo,
-      ciphertext
-    ]);
+    const callData = this.logChainInterface.encodeFunctionData(
+      "respondToHandshake",
+      [inResponseTo, ciphertext]
+    );
 
     return this.executeUserOp(callData);
   }
 
   private async executeUserOp(callData: string): Promise<any> {
-    const userOp = {
+    const callGasLimit = 1_000_000n;
+    const verificationGasLimit = 1_000_000n;
+    const maxFeePerGas = 1_000_000_000n;
+    const maxPriorityFeePerGas = 1_000_000_000n;
+
+    const userOp: PackedUserOperation = {
       sender: this.smartAccountAddress,
       nonce: await this.smartAccountClient.getNonce(),
-      initCode: "0x", // assuming account is already deployed
+      initCode: "0x", // No init code for existing accounts
       callData,
-      callGasLimit: 1000000n, 
-      verificationGasLimit: 1000000n,
-      preVerificationGas: 100000n,
-      maxFeePerGas: 1000000000n, // 1 gwei
-      maxPriorityFeePerGas: 1000000000n,
-      paymasterAndData: "0x", // no paymaster
-      signature: "0x" // will be filled by smart account client
+
+      accountGasLimits: pack128x128(verificationGasLimit, callGasLimit),
+      preVerificationGas: 100_000n,
+      gasFees: pack128x128(maxFeePerGas, maxPriorityFeePerGas),
+
+      paymasterAndData: "0x",
+      signature: "0x",
     };
 
-    const signedUserOp = await this.smartAccountClient.signUserOperation(userOp);
+    const signedUserOp = await this.smartAccountClient.signUserOperation(
+      userOp
+    );
     const userOpHash = await this.bundlerClient.sendUserOperation(signedUserOp);
-    
-    const receipt = await this.bundlerClient.waitForUserOperationReceipt(userOpHash);
+
+    const receipt = await this.bundlerClient.waitForUserOperationReceipt(
+      userOpHash
+    );
     return receipt;
   }
 }
@@ -161,7 +168,7 @@ export class DirectEntryPointExecutor implements IExecutor {
     this.logChainInterface = new Interface([
       "function sendMessage(bytes calldata ciphertext, bytes32 topic, uint256 timestamp, uint256 nonce)",
       "function initiateHandshake(bytes32 recipientHash, bytes pubKeys, bytes ephemeralPubKey, bytes plaintextPayload)",
-      "function respondToHandshake(bytes32 inResponseTo, bytes ciphertext)"
+      "function respondToHandshake(bytes32 inResponseTo, bytes ciphertext)",
     ]);
     this.entryPointContract = entryPointContract.connect(signer) as Contract;
   }
@@ -176,7 +183,7 @@ export class DirectEntryPointExecutor implements IExecutor {
       ciphertext,
       topic,
       timestamp,
-      nonce
+      nonce,
     ]);
 
     return this.executeDirectUserOp(callData);
@@ -188,12 +195,10 @@ export class DirectEntryPointExecutor implements IExecutor {
     ephemeralPubKey: string,
     plaintextPayload: Uint8Array
   ): Promise<any> {
-    const callData = this.logChainInterface.encodeFunctionData("initiateHandshake", [
-      recipientHash,
-      pubKeys,
-      ephemeralPubKey,
-      plaintextPayload
-    ]);
+    const callData = this.logChainInterface.encodeFunctionData(
+      "initiateHandshake",
+      [recipientHash, pubKeys, ephemeralPubKey, plaintextPayload]
+    );
 
     return this.executeDirectUserOp(callData);
   }
@@ -202,35 +207,45 @@ export class DirectEntryPointExecutor implements IExecutor {
     inResponseTo: string,
     ciphertext: Uint8Array
   ): Promise<any> {
-    const callData = this.logChainInterface.encodeFunctionData("respondToHandshake", [
-      inResponseTo,
-      ciphertext
-    ]);
+    const callData = this.logChainInterface.encodeFunctionData(
+      "respondToHandshake",
+      [inResponseTo, ciphertext]
+    );
 
     return this.executeDirectUserOp(callData);
   }
 
   private async executeDirectUserOp(callData: string): Promise<any> {
-    const userOp = {
+    const callGasLimit = 1_000_000n;
+    const verificationGasLimit = 1_000_000n;
+    const maxFeePerGas = 1_000_000_000n;
+    const maxPriorityFeePerGas = 1_000_000_000n;
+
+    const userOp: PackedUserOperation = {
       sender: this.smartAccountAddress,
       nonce: await this.smartAccountClient.getNonce(),
       initCode: "0x",
       callData,
-      callGasLimit: 1000000n,
-      verificationGasLimit: 1000000n,
-      preVerificationGas: 100000n,
-      maxFeePerGas: 1000000000n,
-      maxPriorityFeePerGas: 1000000000n,
+
+      accountGasLimits: pack128x128(verificationGasLimit, callGasLimit),
+      preVerificationGas: 100_000n,
+      gasFees: pack128x128(maxFeePerGas, maxPriorityFeePerGas),
+
       paymasterAndData: "0x",
-      signature: "0x"
+      signature: "0x",
     };
 
-    const signedUserOp = await this.smartAccountClient.signUserOperation(userOp);
-    
+    const signedUserOp = await this.smartAccountClient.signUserOperation(
+      userOp
+    );
+
     // execute directly via EntryPoint.handleOps (bypasses bundler)
-    const tx = await this.entryPointContract.handleOps([signedUserOp], await this.signer.getAddress());
+    const tx = await this.entryPointContract.handleOps(
+      [signedUserOp],
+      await this.signer.getAddress()
+    );
     const receipt = await tx.wait();
-    
+
     return receipt;
   }
 }
@@ -277,11 +292,13 @@ export class ExecutorFactory {
       entryPointAddress?: string;
       entryPointContract?: Contract | BaseContract;
       bundlerClient?: any;
-      isTestEnvironment?: boolean; 
+      isTestEnvironment?: boolean;
     }
   ): Promise<IExecutor> {
-    if (signerOrAccount.address && (options?.bundlerClient || options?.entryPointContract)) {
-      
+    if (
+      signerOrAccount.address &&
+      (options?.bundlerClient || options?.entryPointContract)
+    ) {
       if (options.isTestEnvironment && options.entryPointContract) {
         return new DirectEntryPointExecutor(
           signerOrAccount.address,
@@ -290,7 +307,7 @@ export class ExecutorFactory {
           signerOrAccount.signer || signerOrAccount
         );
       }
-      
+
       if (options.bundlerClient && options.entryPointAddress) {
         return new UserOpExecutor(
           signerOrAccount.address,
@@ -299,7 +316,7 @@ export class ExecutorFactory {
         );
       }
     }
-    
+
     return new EOAExecutor(contract);
   }
 }

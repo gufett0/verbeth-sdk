@@ -9,6 +9,7 @@ import {
   isSmartContract, 
   verifyEIP1271Signature 
 } from "../src/utils";  
+import { ExecutorFactory } from "../src";
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
 
 const fakeProvider = {
@@ -71,6 +72,8 @@ describe("Utils Functions", () => {
   });
 });
 
+
+
 describe("sendEncryptedMessage", () => {
   it("calls contract.sendMessage with expected parameters", async () => {
     const mockSendMessage = vi.fn().mockResolvedValue("txHash");
@@ -78,11 +81,12 @@ describe("sendEncryptedMessage", () => {
       sendMessage: mockSendMessage,
     } as unknown as LogChainV1;
 
+    const executor = ExecutorFactory.createEOA(fakeContract);
     const recipientKey = nacl.box.keyPair();
     const senderSign = nacl.sign.keyPair();
 
     await sendEncryptedMessage({
-      contract: fakeContract,
+      executor: executor,
       topic: "0x" + "ab".repeat(32),
       message: "hi",
       recipientPubKey: recipientKey.publicKey,
@@ -106,12 +110,13 @@ describe("sendEncryptedMessage", () => {
       sendMessage: mockSendMessage,
     } as unknown as LogChainV1;
 
+    const executor = ExecutorFactory.createEOA(fakeContract);
     const recipientKey = nacl.box.keyPair();
     const senderSign = nacl.sign.keyPair();
 
     // send two messages from same sender
     await sendEncryptedMessage({
-      contract: fakeContract,
+      executor: executor,
       topic: "0x" + "ab".repeat(32),
       message: "message 1",
       recipientPubKey: recipientKey.publicKey,
@@ -121,7 +126,7 @@ describe("sendEncryptedMessage", () => {
     });
 
     await sendEncryptedMessage({
-      contract: fakeContract,
+      executor: executor,
       topic: "0x" + "ab".repeat(32),
       message: "message 2",
       recipientPubKey: recipientKey.publicKey,

@@ -6,7 +6,6 @@ import {
   hexlify,
   Signer
 } from "ethers";
-import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
 import { getNextNonce } from './utils/nonce';
 import { encryptMessage, encryptStructuredPayload } from './crypto';
 import { 
@@ -16,13 +15,15 @@ import {
   createHandshakeResponseContent
 } from './payload';
 import { IdentityKeyPair, DerivationProof } from './types';  
+import { IExecutor } from './executor';
 import nacl from 'tweetnacl';
 
 /**
- * Sends an encrypted message assuming recipient's keys were already obtained via handshake
+ * Sends an encrypted message assuming recipient's keys were already obtained via handshake.
+ * Executor-agnostic: works with EOA, UserOp, and Direct EntryPoint (for tests)
  */
 export async function sendEncryptedMessage({
-  contract,
+  executor,
   topic,
   message,
   recipientPubKey,
@@ -30,7 +31,7 @@ export async function sendEncryptedMessage({
   senderSignKeyPair,
   timestamp
 }: {
-  contract: LogChainV1;
+  executor: IExecutor;
   topic: string;
   message: string;
   recipientPubKey: Uint8Array;          // X25519 key for encryption
@@ -38,6 +39,10 @@ export async function sendEncryptedMessage({
   senderSignKeyPair: nacl.SignKeyPair;  // Ed25519 keys for signing
   timestamp: number;
 }) {
+  if (!executor) {
+    throw new Error("Executor must be provided");
+  }
+
   const ephemeralKeyPair = nacl.box.keyPair();
 
   const ciphertext = encryptMessage(
@@ -51,34 +56,38 @@ export async function sendEncryptedMessage({
 
   const nonce = getNextNonce(senderAddress, topic);
 
-  return contract.sendMessage(toUtf8Bytes(ciphertext), topic, timestamp, nonce);
+  return executor.sendMessage(toUtf8Bytes(ciphertext), topic, timestamp, nonce);
 }
 
 /**
- * Initiates an on-chain handshake with unified keys and mandatory identity proof
+ * Initiates an on-chain handshake with unified keys and mandatory identity proof.
+ * Executor-agnostic: works with EOA, UserOp, and Direct EntryPoint (for tests)
  */
 export async function initiateHandshake({
-  contract,
+  executor,
   recipientAddress,
   identityKeyPair,
   ephemeralPubKey,
   plaintextPayload,
-  derivationProof,         // 🆕 Using type from types.ts
+  derivationProof,
   signer
 }: {
-  contract: LogChainV1;
+  executor: IExecutor;
   recipientAddress: string;
   identityKeyPair: IdentityKeyPair;
   ephemeralPubKey: Uint8Array;
   plaintextPayload: string;
-  derivationProof: DerivationProof;  // 🆕 Using type from types.ts
+  derivationProof: DerivationProof;
   signer: Signer;
 }) {
+  if (!executor) {
+    throw new Error("Executor must be provided");
+  }
+
   const recipientHash = keccak256(
     toUtf8Bytes('contact:' + recipientAddress.toLowerCase())
   );
 
-  // 🆕 Sempre include derivation proof (obbligatorio)
   const handshakeContent: HandshakeContent = {
     plaintextPayload,
     derivationProof
@@ -86,52 +95,55 @@ export async function initiateHandshake({
 
   const serializedPayload = serializeHandshakeContent(handshakeContent);
 
-  // 🆕 Create unified pubKeys (65 bytes: version + X25519 + Ed25519)
+  // Create unified pubKeys (65 bytes: version + X25519 + Ed25519)
   const unifiedPubKeys = encodeUnifiedPubKeys(
     identityKeyPair.publicKey,        // X25519 for encryption
     identityKeyPair.signingPublicKey  // Ed25519 for signing
   );
 
-  // Contract call with unified keys
-  return await contract.initiateHandshake(
+  return await executor.initiateHandshake(
     recipientHash,
-    hexlify(unifiedPubKeys),            // 🆕 65 bytes unified field
+    hexlify(unifiedPubKeys),
     hexlify(ephemeralPubKey),
     toUtf8Bytes(serializedPayload)
   );
 }
 
 /**
- * Responds to a handshake with unified keys and mandatory identity proof
+ * Responds to a handshake with unified keys and mandatory identity proof.
+ * Executor-agnostic: works with EOA, UserOp, and Direct EntryPoint (for tests)
  */
 export async function respondToHandshake({
-  contract,
+  executor,
   inResponseTo,
   initiatorPubKey,
   responderIdentityKeyPair,
   responderEphemeralKeyPair,
   note,
-  derivationProof,         // 🆕 Using type from types.ts
+  derivationProof,
   signer
 }: {
-  contract: LogChainV1;
+  executor: IExecutor;
   inResponseTo: string;
   initiatorPubKey: Uint8Array;
   responderIdentityKeyPair: IdentityKeyPair;
   responderEphemeralKeyPair?: nacl.BoxKeyPair;
   note?: string;
-  derivationProof: DerivationProof;  // 🆕 Using type from types.ts
+  derivationProof: DerivationProof;
   signer: Signer;
 }) {
+  if (!executor) {
+    throw new Error("Executor must be provided");
+  }
+
   const ephemeralKeyPair = responderEphemeralKeyPair || nacl.box.keyPair();
   
-  // 🆕 Sempre include derivation proof
   const responseContent = createHandshakeResponseContent(
     responderIdentityKeyPair.publicKey,        // X25519
     responderIdentityKeyPair.signingPublicKey, // Ed25519
     ephemeralKeyPair.publicKey,
     note,
-    derivationProof         // 🆕 Include derivation proof invece di identityProof
+    derivationProof
   );
   
   // Encrypt the response for the initiator
@@ -142,5 +154,5 @@ export async function respondToHandshake({
     ephemeralKeyPair.publicKey
   );
   
-  return contract.respondToHandshake(inResponseTo, toUtf8Bytes(payload));
+  return executor.respondToHandshake(inResponseTo, toUtf8Bytes(payload));
 }

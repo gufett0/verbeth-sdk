@@ -6,6 +6,7 @@ export * from './types';
 export * from './deduplication';
 export * from './utils';
 export * from './identity';
+export * from './executor';
 
 export { decryptMessage as decryptLog } from './crypto';
 
@@ -40,3 +41,11 @@ export {
   deriveIdentityKeyPairWithProof,
   deriveIdentityWithUnifiedKeys
 } from './identity';
+
+export {
+  IExecutor,
+  EOAExecutor,
+  UserOpExecutor,
+  DirectEntryPointExecutor,  
+  ExecutorFactory
+} from './executor';

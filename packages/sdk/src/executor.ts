@@ -123,7 +123,7 @@ export class UserOpExecutor implements IExecutor {
       "function initiateHandshake(bytes32 recipientHash, bytes pubKeys, bytes ephemeralPubKey, bytes plaintextPayload)",
       "function respondToHandshake(bytes32 inResponseTo, bytes ciphertext)",
     ]);
-    
+
     // Smart account interface for executing calls to other contracts
     this.smartAccountInterface = new Interface([
       "function execute(address target, uint256 value, bytes calldata data) returns (bytes)",
@@ -136,18 +136,19 @@ export class UserOpExecutor implements IExecutor {
     timestamp: number,
     nonce: bigint
   ): Promise<any> {
-    const logChainCallData = this.logChainInterface.encodeFunctionData("sendMessage", [
-      ciphertext,
-      topic,
-      timestamp,
-      nonce,
-    ]);
+    const logChainCallData = this.logChainInterface.encodeFunctionData(
+      "sendMessage",
+      [ciphertext, topic, timestamp, nonce]
+    );
 
-    const smartAccountCallData = this.smartAccountInterface.encodeFunctionData("execute", [
-      this.logChainAddress,
-      0, // value
-      logChainCallData,
-    ]);
+    const smartAccountCallData = this.smartAccountInterface.encodeFunctionData(
+      "execute",
+      [
+        this.logChainAddress,
+        0, // value
+        logChainCallData,
+      ]
+    );
 
     return this.executeUserOp(smartAccountCallData);
   }
@@ -163,11 +164,14 @@ export class UserOpExecutor implements IExecutor {
       [recipientHash, pubKeys, ephemeralPubKey, plaintextPayload]
     );
 
-    const smartAccountCallData = this.smartAccountInterface.encodeFunctionData("execute", [
-      this.logChainAddress,
-      0, // value
-      logChainCallData,
-    ]);
+    const smartAccountCallData = this.smartAccountInterface.encodeFunctionData(
+      "execute",
+      [
+        this.logChainAddress,
+        0, // value
+        logChainCallData,
+      ]
+    );
 
     return this.executeUserOp(smartAccountCallData);
   }
@@ -181,11 +185,14 @@ export class UserOpExecutor implements IExecutor {
       [inResponseTo, ciphertext]
     );
 
-    const smartAccountCallData = this.smartAccountInterface.encodeFunctionData("execute", [
-      this.logChainAddress,
-      0, // value
-      logChainCallData,
-    ]);
+    const smartAccountCallData = this.smartAccountInterface.encodeFunctionData(
+      "execute",
+      [
+        this.logChainAddress,
+        0, // value
+        logChainCallData,
+      ]
+    );
 
     return this.executeUserOp(smartAccountCallData);
   }
@@ -241,12 +248,12 @@ export class DirectEntryPointExecutor implements IExecutor {
       "function initiateHandshake(bytes32 recipientHash, bytes pubKeys, bytes ephemeralPubKey, bytes plaintextPayload)",
       "function respondToHandshake(bytes32 inResponseTo, bytes ciphertext)",
     ]);
-    
+
     // Smart account interface for executing calls to other contracts
     this.smartAccountInterface = new Interface([
       "function execute(address target, uint256 value, bytes calldata data) returns (bytes)",
     ]);
-    
+
     this.entryPointContract = entryPointContract.connect(signer) as Contract;
     // Auto-detect AA spec version (v0.6 / v0.7)
     this.spec = detectSpecVersion(this.entryPointContract.interface);
@@ -258,56 +265,117 @@ export class DirectEntryPointExecutor implements IExecutor {
     timestamp: number,
     nonce: bigint
   ): Promise<any> {
-    const logChainCallData = this.logChainInterface.encodeFunctionData("sendMessage", [
-      ciphertext,
-      topic,
-      timestamp,
-      nonce,
-    ]);
+    // **PATCH 1**: Debug via callStatic prima di costruire la UserOp
+    try {
+      const logChainContract = new Contract(
+        this.logChainAddress,
+        this.logChainInterface,
+        this.signer
+      );
+      console.log("🔍 Testing sendMessage via callStatic...");
+      await logChainContract.sendMessage.staticCall(ciphertext, topic, timestamp, nonce);
+      console.log("✅ callStatic successful for sendMessage");
+    } catch (error) {
+      console.error("❌ callStatic failed for sendMessage:", error);
+      throw error;
+    }
 
-    const smartAccountCallData = this.smartAccountInterface.encodeFunctionData("execute", [
-      this.logChainAddress,
-      0, // value
-      logChainCallData,
-    ]);
+    const logChainCallData = this.logChainInterface.encodeFunctionData(
+      "sendMessage",
+      [ciphertext, topic, timestamp, nonce]
+    );
+
+    const smartAccountCallData = this.smartAccountInterface.encodeFunctionData(
+      "execute",
+      [
+        this.logChainAddress,
+        0, // value
+        logChainCallData,
+      ]
+    );
 
     return this.executeDirectUserOp(smartAccountCallData);
   }
 
+  
   async initiateHandshake(
     recipientHash: string,
     pubKeys: string,
     ephemeralPubKey: string,
     plaintextPayload: Uint8Array
   ): Promise<any> {
+    // **PATCH 1**: Debug via callStatic prima di costruire la UserOp
+    try {
+      const logChainContract = new Contract(
+        this.logChainAddress,
+        this.logChainInterface,
+        this.signer
+      );
+      console.log("🔍 Testing initiateHandshake via callStatic...");
+      await logChainContract.initiateHandshake.staticCall(
+        recipientHash,
+        pubKeys,
+        ephemeralPubKey,
+        plaintextPayload
+      );
+      console.log("✅ callStatic successful for initiateHandshake");
+    } catch (error) {
+      console.error("❌ callStatic failed for initiateHandshake:", error);
+      throw error;
+    }
+
+    // **PATCH 2**: Usa lo stesso calldata per evitare mismatch
     const logChainCallData = this.logChainInterface.encodeFunctionData(
       "initiateHandshake",
       [recipientHash, pubKeys, ephemeralPubKey, plaintextPayload]
     );
 
-    const smartAccountCallData = this.smartAccountInterface.encodeFunctionData("execute", [
-      this.logChainAddress,
-      0, // value
-      logChainCallData,
-    ]);
+    const smartAccountCallData = this.smartAccountInterface.encodeFunctionData(
+      "execute",
+      [
+        this.logChainAddress,
+        0, // value
+        logChainCallData,
+      ]
+    );
 
     return this.executeDirectUserOp(smartAccountCallData);
   }
+
+  
 
   async respondToHandshake(
     inResponseTo: string,
     ciphertext: Uint8Array
   ): Promise<any> {
+    // **PATCH 1**: Debug via callStatic prima di costruire la UserOp
+    try {
+      const logChainContract = new Contract(
+        this.logChainAddress,
+        this.logChainInterface,
+        this.signer
+      );
+      console.log("🔍 Testing respondToHandshake via callStatic...");
+      await logChainContract.respondToHandshake.staticCall(inResponseTo, ciphertext);
+      console.log("✅ callStatic successful for respondToHandshake");
+    } catch (error) {
+      console.error("❌ callStatic failed for respondToHandshake:", error);
+      throw error;
+    }
+
     const logChainCallData = this.logChainInterface.encodeFunctionData(
       "respondToHandshake",
       [inResponseTo, ciphertext]
     );
 
-    const smartAccountCallData = this.smartAccountInterface.encodeFunctionData("execute", [
-      this.logChainAddress,
-      0, // value
-      logChainCallData,
-    ]);
+    const smartAccountCallData = this.smartAccountInterface.encodeFunctionData(
+      "execute",
+      [
+        this.logChainAddress,
+        0, // value
+        logChainCallData,
+      ]
+    );
 
     return this.executeDirectUserOp(smartAccountCallData);
   }
@@ -356,7 +424,9 @@ export class DirectEntryPointExecutor implements IExecutor {
     const paddedUserOp = padBigints(userOp);
     console.log("Padded UserOp:", paddedUserOp);
 
-    const signed = await this.smartAccountClient.signUserOperation(paddedUserOp);
+    const signed = await this.smartAccountClient.signUserOperation(
+      paddedUserOp
+    );
 
     // Direct submit to EntryPoint
     const tx = await this.entryPointContract.handleOps(
@@ -419,7 +489,11 @@ export class ExecutorFactory {
       signerOrAccount.address &&
       (options?.bundlerClient || options?.entryPointContract)
     ) {
-      if (options.isTestEnvironment && options.entryPointContract && options.logChainAddress) {
+      if (
+        options.isTestEnvironment &&
+        options.entryPointContract &&
+        options.logChainAddress
+      ) {
         return new DirectEntryPointExecutor(
           signerOrAccount.address,
           options.entryPointContract,
@@ -429,7 +503,11 @@ export class ExecutorFactory {
         );
       }
 
-      if (options.bundlerClient && options.entryPointAddress && options.logChainAddress) {
+      if (
+        options.bundlerClient &&
+        options.entryPointAddress &&
+        options.logChainAddress
+      ) {
         return new UserOpExecutor(
           signerOrAccount.address,
           options.logChainAddress,

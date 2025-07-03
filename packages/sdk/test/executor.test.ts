@@ -13,6 +13,10 @@ import {
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
 import { IdentityKeyPair, DerivationProof } from "../src/types";
 
+const TEST_SMART_ACCOUNT_ADDRESS = "0x" + "12".repeat(20);
+const TEST_ENTRYPOINT_ADDRESS = "0x" + "45".repeat(20);
+const TEST_LOGCHAIN_ADDRESS = "0x" + "78".repeat(20);
+
 const mockSendMessage = vi.fn().mockResolvedValue("txHash");
 const mockInitiateHandshake = vi.fn().mockResolvedValue("txHash");
 const mockRespondToHandshake = vi.fn().mockResolvedValue("txHash");
@@ -70,9 +74,9 @@ describe("ExecutorFactory", () => {
 
   it("creates UserOp executor with correct parameters", () => {
     const executor = ExecutorFactory.createUserOp(
-      "0x123",
-      "0x456", 
-      "0x789",
+      TEST_SMART_ACCOUNT_ADDRESS,
+      TEST_ENTRYPOINT_ADDRESS, 
+      TEST_LOGCHAIN_ADDRESS,
       mockBundler,
       mockSmartAccount
     );
@@ -81,9 +85,9 @@ describe("ExecutorFactory", () => {
 
   it("creates DirectEntryPoint executor for testing", () => {
     const executor = ExecutorFactory.createDirectEntryPoint(
-      "0x123",
+      TEST_SMART_ACCOUNT_ADDRESS,
       mockEntryPoint,
-      "0x789", 
+      TEST_LOGCHAIN_ADDRESS, 
       mockSmartAccount,
       mockSigner
     );
@@ -120,9 +124,9 @@ describe("sendEncryptedMessage with Executors", () => {
 
   it("works with UserOp executor", async () => {
     const executor = ExecutorFactory.createUserOp(
-      "0x123",
-      "0x456",
-      "0x789",
+      TEST_SMART_ACCOUNT_ADDRESS,
+      TEST_ENTRYPOINT_ADDRESS,
+      TEST_LOGCHAIN_ADDRESS,
       mockBundler,
       mockSmartAccount
     );
@@ -132,7 +136,7 @@ describe("sendEncryptedMessage with Executors", () => {
       topic: "0x" + "cd".repeat(32),
       message: "Hello from UserOp",
       recipientPubKey: testRecipientKey.publicKey,
-      senderAddress: "0x123",
+      senderAddress: TEST_SMART_ACCOUNT_ADDRESS,
       senderSignKeyPair: testSenderSignKey,
       timestamp: 43,
     });
@@ -145,9 +149,9 @@ describe("sendEncryptedMessage with Executors", () => {
 
   it("works with DirectEntryPoint executor", async () => {
     const executor = ExecutorFactory.createDirectEntryPoint(
-      "0x123",
+      TEST_SMART_ACCOUNT_ADDRESS,
       mockEntryPoint,
-      "0x789", 
+      TEST_LOGCHAIN_ADDRESS, 
       mockSmartAccount,
       mockSigner
     );
@@ -157,7 +161,7 @@ describe("sendEncryptedMessage with Executors", () => {
       topic: "0x" + "ef".repeat(32),
       message: "Hello from DirectEntryPoint",
       recipientPubKey: testRecipientKey.publicKey,
-      senderAddress: "0x123",
+      senderAddress: TEST_SMART_ACCOUNT_ADDRESS,
       senderSignKeyPair: testSenderSignKey,
       timestamp: 44,
     });
@@ -230,9 +234,9 @@ describe("initiateHandshake with Executors", () => {
 
   it("works with UserOp executor", async () => {
     const executor = ExecutorFactory.createUserOp(
-      "0x123",
-      "0x456",
-      "0x789",
+      TEST_SMART_ACCOUNT_ADDRESS,
+      TEST_ENTRYPOINT_ADDRESS,
+      TEST_LOGCHAIN_ADDRESS,
       mockBundler,
       mockSmartAccount
     );
@@ -254,9 +258,9 @@ describe("initiateHandshake with Executors", () => {
 
   it("works with DirectEntryPoint executor", async () => {
     const executor = ExecutorFactory.createDirectEntryPoint(
-      "0x123",
+      TEST_SMART_ACCOUNT_ADDRESS,
       mockEntryPoint,
-      "0x789", 
+      TEST_LOGCHAIN_ADDRESS, 
       mockSmartAccount,
       mockSigner
     );
@@ -304,9 +308,9 @@ describe("respondToHandshake with Executors", () => {
 
   it("works with UserOp executor", async () => {
     const executor = ExecutorFactory.createUserOp(
-      "0x123",
-      "0x456",
-      "0x789",
+      TEST_SMART_ACCOUNT_ADDRESS,
+      TEST_ENTRYPOINT_ADDRESS,
+      TEST_LOGCHAIN_ADDRESS,
       mockBundler,
       mockSmartAccount
     );
@@ -328,9 +332,9 @@ describe("respondToHandshake with Executors", () => {
 
   it("works with DirectEntryPoint executor", async () => {
     const executor = ExecutorFactory.createDirectEntryPoint(
-      "0x123",
+      TEST_SMART_ACCOUNT_ADDRESS,
       mockEntryPoint,
-      "0x789", 
+      TEST_LOGCHAIN_ADDRESS, 
       mockSmartAccount,
       mockSigner
     );

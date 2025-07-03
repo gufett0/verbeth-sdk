@@ -5,15 +5,15 @@ export interface LogMessage {
   ciphertext: string; // JSON string of EncryptedPayload
   timestamp: number;
   topic: string; // hex string (bytes32)
-  nonce: bigint
+  nonce: bigint;
 }
 
 export interface HandshakeLog {
   recipientHash: string;
   sender: string;
-  pubKeys: string;              // Unified field (hex string of 65 bytes: version + X25519 + Ed25519)
+  pubKeys: string; // Unified field (hex string of 65 bytes: version + X25519 + Ed25519)
   ephemeralPubKey: string;
-  plaintextPayload: string;     // Now always contains JSON with derivationProof
+  plaintextPayload: string; // Now always contains JSON with derivationProof
 }
 
 export interface HandshakeResponseLog {
@@ -34,26 +34,48 @@ export interface IdentityKeyPair {
 
 // Derivation proof structure (now mandatory in all handshakes)
 export interface DerivationProof {
-  message: string;      // "VerbEth Identity Key Derivation v1\nAddress: ..."
-  signature: string;    // Ethereum signature of the message
+  message: string; // "VerbEth Identity Key Derivation v1\nAddress: ..."
+  signature: string; // Ethereum signature of the message
 }
 
-export interface PackedUserOperation {
+export type PackedUserOperation =
+  typeof DEFAULT_AA_VERSION extends "v0.6" ? UserOpV06 : UserOpV07;
+
+export interface BaseUserOp {
   sender: string;
   nonce: bigint;
   initCode: string;
   callData: string;
-  accountGasLimits: bigint;
   preVerificationGas: bigint;
-  gasFees: bigint;
   paymasterAndData: string;
   signature: string;
 }
 
+export interface UserOpV06 extends BaseUserOp {
+  callGasLimit: bigint;
+  verificationGasLimit: bigint;
+  maxFeePerGas: bigint;
+  maxPriorityFeePerGas: bigint;
+}
+
+export interface UserOpV07 extends BaseUserOp {
+  /**
+   * = (verificationGasLimit << 128) \| callGasLimit
+   */
+  accountGasLimits: bigint;
+  /**
+   * = (maxFeePerGas << 128) \| maxPriorityFeePerGas
+   */
+  gasFees: bigint;
+}
+
+export type AASpecVersion = "v0.6" | "v0.7";
+export const DEFAULT_AA_VERSION: AASpecVersion = "v0.7";
+
 // ========== NOTES ==========
-// 
-// Handshake parsing functions like parseHandshakeKeys() and 
-// migrateLegacyHandshakeLog() are available in payload.ts and 
+//
+// Handshake parsing functions like parseHandshakeKeys() and
+// migrateLegacyHandshakeLog() are available in payload.ts and
 // re-exported from index.ts for convenience.
 //
 // All handshakes now REQUIRE derivationProof in the plaintextPayload.

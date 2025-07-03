@@ -1,12 +1,55 @@
-// packages/sdk/src/executor.ts
+// packages/sdk/src/executor.ts - Work in progress
 
-import { Signer, Contract, Interface, BaseContract } from "ethers";
-import type { PackedUserOperation } from "./types";
+import {
+  Signer,
+  Contract,
+  Interface,
+  BaseContract,
+  toBeHex,
+  zeroPadValue,
+} from "ethers";
+import {
+  AASpecVersion,
+  UserOpV06,
+  UserOpV07,
+  PackedUserOperation,
+} from "./types";
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
 
 function pack128x128(high: bigint, low: bigint): bigint {
   return (high << 128n) | (low & ((1n << 128n) - 1n));
 }
+
+// Unpack a packed 256-bit value into two 128-bit values
+export function split128x128(word: bigint): readonly [bigint, bigint] {
+  const lowMask = (1n << 128n) - 1n;
+  return [word >> 128n, word & lowMask] as const;
+}
+
+/* -------------------------------------------------------------------------- */
+/*    Helpers for compatibility between AA spec v0.6 and v0.7                 */
+/* -------------------------------------------------------------------------- */
+
+// ► Detects the version from the EntryPoint ABI (v0.7 introduces getAccountGasLimits)
+const detectSpecVersion = (iface: Interface): AASpecVersion => {
+  try {
+    iface.getFunction("getAccountGasLimits");
+    return "v0.7";
+  } catch {
+    return "v0.6";
+  }
+};
+
+// ► Automatically transforms all bigints into padded bytes32 (uint256)
+const padBigints = <T extends Record<string, any>>(op: T): T => {
+  const out: any = { ...op };
+  for (const [k, v] of Object.entries(out)) {
+    if (typeof v === "bigint") {
+      out[k] = zeroPadValue(toBeHex(v), 32);
+    }
+  }
+  return out as T;
+};
 
 export interface IExecutor {
   sendMessage(
@@ -158,6 +201,7 @@ export class UserOpExecutor implements IExecutor {
 export class DirectEntryPointExecutor implements IExecutor {
   private logChainInterface: Interface;
   private entryPointContract: Contract;
+  private spec: AASpecVersion;
 
   constructor(
     private smartAccountAddress: string,
@@ -171,6 +215,8 @@ export class DirectEntryPointExecutor implements IExecutor {
       "function respondToHandshake(bytes32 inResponseTo, bytes ciphertext)",
     ]);
     this.entryPointContract = entryPointContract.connect(signer) as Contract;
+    // Auto-detect AA spec version (v0.6 / v0.7)
+    this.spec = detectSpecVersion(this.entryPointContract.interface);
   }
 
   async sendMessage(
@@ -215,38 +261,58 @@ export class DirectEntryPointExecutor implements IExecutor {
     return this.executeDirectUserOp(callData);
   }
 
-  private async executeDirectUserOp(callData: string): Promise<any> {
+  private async executeDirectUserOp(callData: string) {
     const callGasLimit = 1_000_000n;
     const verificationGasLimit = 1_000_000n;
     const maxFeePerGas = 1_000_000_000n;
     const maxPriorityFeePerGas = 1_000_000_000n;
 
-    const userOp: PackedUserOperation = {
-      sender: this.smartAccountAddress,
-      nonce: await this.smartAccountClient.getNonce(),
-      initCode: "0x",
-      callData,
+    /* ---------------------------------------------------------- */
+    /* 1️⃣  Build UserOperation in the correct layout             */
+    /* ---------------------------------------------------------- */
 
-      accountGasLimits: pack128x128(verificationGasLimit, callGasLimit),
-      preVerificationGas: 100_000n,
-      gasFees: pack128x128(maxFeePerGas, maxPriorityFeePerGas),
+    let userOp: UserOpV06 | UserOpV07;
 
-      paymasterAndData: "0x",
-      signature: "0x",
-    };
+    if (this.spec === "v0.6") {
+      userOp = {
+        sender: this.smartAccountAddress,
+        nonce: await this.smartAccountClient.getNonce(),
+        initCode: "0x",
+        callData,
+        callGasLimit,
+        verificationGasLimit,
+        preVerificationGas: 100_000n,
+        maxFeePerGas,
+        maxPriorityFeePerGas,
+        paymasterAndData: "0x",
+        signature: "0x",
+      } as UserOpV06;
+    } else {
+      userOp = {
+        sender: this.smartAccountAddress,
+        nonce: await this.smartAccountClient.getNonce(),
+        initCode: "0x",
+        callData,
+        accountGasLimits: pack128x128(verificationGasLimit, callGasLimit),
+        preVerificationGas: 100_000n,
+        gasFees: pack128x128(maxFeePerGas, maxPriorityFeePerGas),
+        paymasterAndData: "0x",
+        signature: "0x",
+      } as UserOpV07;
+    }
 
-    const signedUserOp = await this.smartAccountClient.signUserOperation(
-      userOp
-    );
+    // 2️⃣  Off-chain signing
+    const signed = await this.smartAccountClient.signUserOperation(userOp);
 
-    // execute directly via EntryPoint.handleOps (bypasses bundler)
+    // 3️⃣  Pad bigints → bytes32 for the on-chain call
+    const directOp = padBigints(signed);
+
+    // 4️⃣  Direct submit to EntryPoint
     const tx = await this.entryPointContract.handleOps(
-      [signedUserOp],
+      [directOp],
       await this.signer.getAddress()
     );
-    const receipt = await tx.wait();
-
-    return receipt;
+    return tx.wait();
   }
 }
 

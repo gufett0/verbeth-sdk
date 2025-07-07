@@ -2,10 +2,11 @@
   "name": "verbeth-sdk",
   "private": true,
   "scripts": {
-    "test:integration": "./packages/sdk/node_modules/.bin/vitest run smartaccounts.test.ts --config vitest.integration.config.mjs",
-    "test:integration:watch": "./packages/sdk/node_modules/.bin/vitest smartaccounts.test.ts --config vitest.integration.config.mjs",
+    "test:integration": "./packages/sdk/node_modules/.bin/vitest run tests/handshake.test.ts --config vitest.integration.config.mjs",
+    "test:integration:watch": "./packages/sdk/node_modules/.bin/vitest tests/handshake.test.ts --config vitest.integration.config.mjs",
     "test:unit": "cd packages/sdk && npm run test",
-    "test": "npm run test:unit && npm run test:integration",
+    "test:contracts": "cd packages/contracts && npm run test",
+    "test": "npm run test:unit && npm run test:contracts && npm run test:integration",
     "build": "cd packages/contracts && npm run build && cd ../sdk && npm run build",
     "anvil:start": "anvil --port 8545 --accounts 10 --balance 1000",
     "anvil:stop": "pkill -f anvil"

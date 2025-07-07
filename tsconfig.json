@@ -17,7 +17,6 @@
     }
   },
   "include": [
-    "integration.test.ts",
     "packages/sdk/src/**/*.ts",
     "packages/contracts/typechain-types/**/*.ts"
   ],

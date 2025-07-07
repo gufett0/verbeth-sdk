@@ -19,7 +19,7 @@
     },
     "scripts": {
       "build": "tsc",
-      "test": "vitest"
+      "test": "vitest run"
     }
   }
   

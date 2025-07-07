@@ -10,7 +10,7 @@ export default {
         singleFork: true
       }
     },
-    include: ['smartaccounts.test.ts', '*.test.ts'],
+    include: ['tests/handshake.test.ts', '*.test.ts'],
     exclude: ['**/node_modules/**', 'packages/**']
   },
   define: {

@@ -1,4 +1,4 @@
-// packages/sdk/src/executor.ts - Work in progress
+// packages/sdk/src/executor.ts
 
 import {
   Signer,
@@ -265,20 +265,6 @@ export class DirectEntryPointExecutor implements IExecutor {
     timestamp: number,
     nonce: bigint
   ): Promise<any> {
-    // **PATCH 1**: Debug via callStatic prima di costruire la UserOp
-    try {
-      const logChainContract = new Contract(
-        this.logChainAddress,
-        this.logChainInterface,
-        this.signer
-      );
-      console.log("🔍 Testing sendMessage via callStatic...");
-      await logChainContract.sendMessage.staticCall(ciphertext, topic, timestamp, nonce);
-      console.log("✅ callStatic successful for sendMessage");
-    } catch (error) {
-      console.error("❌ callStatic failed for sendMessage:", error);
-      throw error;
-    }
 
     const logChainCallData = this.logChainInterface.encodeFunctionData(
       "sendMessage",
@@ -304,27 +290,7 @@ export class DirectEntryPointExecutor implements IExecutor {
     ephemeralPubKey: string,
     plaintextPayload: Uint8Array
   ): Promise<any> {
-    // **PATCH 1**: Debug via callStatic prima di costruire la UserOp
-    try {
-      const logChainContract = new Contract(
-        this.logChainAddress,
-        this.logChainInterface,
-        this.signer
-      );
-      console.log("🔍 Testing initiateHandshake via callStatic...");
-      await logChainContract.initiateHandshake.staticCall(
-        recipientHash,
-        pubKeys,
-        ephemeralPubKey,
-        plaintextPayload
-      );
-      console.log("✅ callStatic successful for initiateHandshake");
-    } catch (error) {
-      console.error("❌ callStatic failed for initiateHandshake:", error);
-      throw error;
-    }
 
-    // **PATCH 2**: Usa lo stesso calldata per evitare mismatch
     const logChainCallData = this.logChainInterface.encodeFunctionData(
       "initiateHandshake",
       [recipientHash, pubKeys, ephemeralPubKey, plaintextPayload]
@@ -348,20 +314,6 @@ export class DirectEntryPointExecutor implements IExecutor {
     inResponseTo: string,
     ciphertext: Uint8Array
   ): Promise<any> {
-    // **PATCH 1**: Debug via callStatic prima di costruire la UserOp
-    try {
-      const logChainContract = new Contract(
-        this.logChainAddress,
-        this.logChainInterface,
-        this.signer
-      );
-      console.log("🔍 Testing respondToHandshake via callStatic...");
-      await logChainContract.respondToHandshake.staticCall(inResponseTo, ciphertext);
-      console.log("✅ callStatic successful for respondToHandshake");
-    } catch (error) {
-      console.error("❌ callStatic failed for respondToHandshake:", error);
-      throw error;
-    }
 
     const logChainCallData = this.logChainInterface.encodeFunctionData(
       "respondToHandshake",
@@ -386,10 +338,7 @@ export class DirectEntryPointExecutor implements IExecutor {
     const maxFeePerGas = 1_000_000_000n;
     const maxPriorityFeePerGas = 1_000_000_000n;
 
-    /* ---------------------------------------------------------- */
-    /* Build UserOperation in the correct layout                  */
-    /* ---------------------------------------------------------- */
-
+    // Build UserOperation
     let userOp: UserOpV06 | UserOpV07;
 
     if (this.spec === "v0.6") {
@@ -422,7 +371,7 @@ export class DirectEntryPointExecutor implements IExecutor {
 
     // Pad bigints → bytes32 before signing
     const paddedUserOp = padBigints(userOp);
-    console.log("Padded UserOp:", paddedUserOp);
+    //console.log("Padded UserOp:", paddedUserOp);
 
     const signed = await this.smartAccountClient.signUserOperation(
       paddedUserOp

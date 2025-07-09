@@ -9,23 +9,27 @@ End-to-end encrypted messaging over Ethereum logs, using the blockchain as the o
 1. Alice generates a new **ephemeral keypair**.
 2. She emits a `Handshake` event:
    - Includes her ephemeral public key
-   - Includes her long-term X25519 identity key (derived from Ethereum address)
-   - Plaintext payload like: `"Hi Bob, respond if you're online"`
+   - Includes her long-term unified keys (X25519 identity + Ed25519 signing, derived from Ethereum address)
+   - Plaintext payload like: `"Hi Bob, respond if you're online"` with derivation proof
 3. Bob watches logs for `Handshake` events addressed to him:
    - Looks for `keccak256("contact:0xMyAddress")` in `recipientHash`
-   - Verifies if he's the recipient
+   - Verifies Alice's identity using her derivation proof
 4. If interested, Bob responds with a `HandshakeResponse`:
-   - Contains a payload encrypted to Alice's ephemeral key
-   - Includes his own ephemeral key and optional identity key
-5. Once handshake is complete, both use their shared secret to exchange `MessageSent` logs:
-   - Encrypted payloads using `NaCl.box` and fresh ephemeral keys
+   - Contains a payload encrypted to Alice's **ephemeral key** (not identity key)
+   - Includes his own ephemeral key, identity keys, and derivation proof
+5. Once handshake is complete, both use Bob's identity key for future `MessageSent` logs:
+   - Alice encrypts messages using Bob's **identity key** + **fresh ephemeral keys per message**
+   - Alice signs messages using her **signing key**
    - Bob and Alice filter messages using topics, timestamp, or sender
+
+✅ **Forward Secrecy**: Every message uses fresh ephemeral keys, providing forward secrecy for all communication.
 
 ✅ If the sender does not yet know the recipient's long-term public key (X25519), 
 they must emit a `Handshake` event. This allows the recipient to reply with their key.
 
-If the recipient’s public key is already known (from a past `HandshakeResponse`, 
+If the recipient's public key is already known (from a past `HandshakeResponse`, 
 on-chain announcement, or static mapping), the sender may skip the handshake.
+
 ```
 ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |                            |                            |
@@ -58,7 +62,8 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |                            |  If valid:                 |
       |                            |   - Generate ephemeral key |
       |                            |   - Prepare response       |
-      |                            |   - Encrypt w/ Alice's key |
+      |                            |   - Encrypt w/ Alice's     |
+      |                            |     EPHEMERAL key          |
       |                            |  respondToHandshake()      |
       |                            |  Emit HandshakeResponse    |
       |                            |--------------------------->|
@@ -75,17 +80,23 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |--------------------------->|                            |
       |  Store Bob's keys          |                            |
       |  Ongoing:                  |                            |
-      |   - Encrypt w/ Bob's key   |                            |
+      |   - Generate fresh         |                            |
+      |     ephemeral keys         |                            |
+      |   - Encrypt w/ Bob's       |                            |
+      |     IDENTITY key +         |                            |
+      |     fresh ephemeral        |                            |
       |   - Sign w/ Alice's key    |                            |
       |   - sendMessage()          |--------------------------->|
       |                            |  Message event received    |
-      |                            |  Decrypt w/ Bob's key      |
+      |                            |  Decrypt w/ Bob's          |
+      |                            |    IDENTITY key +          |
+      |                            |    ephemeral from msg      |
       |                            |  Verify signature          |
       |                            |  Secure message delivered  |
       |----------------------------|----------------------------|
       |  Key Security:                                          |
-      |   - Forward Secrecy                                     |
-      |   - Identity Verification                               |
+      |   - Forward Secrecy (fresh ephemeral keys per message) |
+      |   - Identity Verification (derivation proofs)          |
       |   - Address Binding                                     |
       |   - Unified Key Management                              |
 ```

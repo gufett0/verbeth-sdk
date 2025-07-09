@@ -21,8 +21,19 @@ export async function verifyHandshakeIdentity(
   provider: JsonRpcProvider
 ): Promise<boolean> {
   try {
-    // parse handshake payload - now always requires derivationProof
-    const content = parseHandshakePayload(handshakeEvent.plaintextPayload);
+    let plaintextPayload = handshakeEvent.plaintextPayload;
+    
+    if (typeof plaintextPayload === 'string' && plaintextPayload.startsWith('0x')) {
+      try {
+        const bytes = new Uint8Array(Buffer.from(plaintextPayload.slice(2), 'hex'));
+        plaintextPayload = new TextDecoder().decode(bytes);
+      } catch (err) {
+        console.error("Failed to decode hex payload:", err);
+        return false;
+      }
+    }
+    
+    const content = parseHandshakePayload(plaintextPayload);
     
     const parsedKeys = parseHandshakeKeys(handshakeEvent);
     if (!parsedKeys) {

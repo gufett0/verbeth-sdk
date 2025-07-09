@@ -67,14 +67,32 @@ export function decodePayload(json: string): {
   ciphertext: Uint8Array,
   sig?: Uint8Array
 } {
-  const { epk, n, ct, sig } = JSON.parse(json) as EncryptedPayload;
-  return {
-    epk: Buffer.from(epk, 'base64'),
-    nonce: Buffer.from(n, 'base64'),
-    ciphertext: Buffer.from(ct, 'base64'),
-    ...(sig && { sig: Buffer.from(sig, 'base64') })
-  };
+  let actualJson = json;
+
+  if (typeof json === 'string' && json.startsWith('0x')) {
+    try {
+      const bytes = new Uint8Array(Buffer.from(json.slice(2), 'hex'));
+      actualJson = new TextDecoder().decode(bytes);
+    } catch (err) {
+      throw new Error(`Hex decode error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  try {
+    const { epk, n, ct, sig } = JSON.parse(actualJson) as EncryptedPayload;
+    return {
+      epk: Buffer.from(epk, 'base64'),
+      nonce: Buffer.from(n, 'base64'),
+      ciphertext: Buffer.from(ct, 'base64'),
+      ...(sig && { sig: Buffer.from(sig, 'base64') })
+    };
+  } catch (parseError) {
+    throw new Error(
+      `JSON parse error: ${parseError instanceof Error ? parseError.message : String(parseError)}`
+    );
+  }
 }
+
 
 // Unified function for encoding any structured content as Uint8Array
 export function encodeStructuredContent<T>(content: T): Uint8Array {

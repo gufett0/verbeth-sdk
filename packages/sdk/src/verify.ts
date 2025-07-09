@@ -56,7 +56,7 @@ export async function verifyHandshakeIdentity(
 // ============= HandshakeResponse Verification =============
 
 /**
- * 🆕 Simplified handshake response verification with mandatory derivation proof
+ * handshake response verification with mandatory derivation proof
  */
 export async function verifyHandshakeResponseIdentity(
   responseEvent: HandshakeResponseLog,
@@ -113,7 +113,7 @@ export async function verifyHandshakeResponseIdentity(
 // ============= Utility Functions =============
 
 /**
- * 🆕 Convenience function to verify both handshake and extract keys
+ * convenience function to verify both handshake and extract keys
  */
 export async function verifyAndExtractHandshakeKeys(
   handshakeEvent: HandshakeLog,

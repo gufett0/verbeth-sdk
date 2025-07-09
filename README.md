@@ -30,7 +30,7 @@ on-chain announcement, or static mapping), the sender may skip the handshake.
 ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |                            |                            |
       |----------------------------|                            |
-      |  PHASE 1: Identity Key Derivation (Proof)               |
+      |  PHASE 0: Identity Key Derivation (Proof)               |
       |--------------------------->|                            |
       |  Sign derivation msg       |                            |
       |  Derive unified keys       |                            |
@@ -39,7 +39,7 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |                            |  Bob: Sign/derive keys     |
       |                            |  Create DerivationProof    |
       |                            |                            |
-      |  PHASE 2: Alice Initiates Handshake                     |
+      |  PHASE 1: Alice Initiates Handshake                     |
       |--------------------------->|                            |
       |  Generate ephemeral keypair|                            |
       |  Prepare HandshakeContent  |                            |
@@ -47,13 +47,13 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |  initiateHandshake()       |--------------------------->|
       |                            |  Emit Handshake event      |
       |                            |--------------------------->|
-      |                            |  PHASE 3: Bob Receives     |
+      |                            |  PHASE 2: Bob Receives     |
       |                            |  Listen for event          |
       |                            |  Parse unified pubKeys     |
       |                            |  Extract DerivationProof   |
       |                            |  Verify Alice's identity   |
       |                            |                            |
-      |                            |  PHASE 4: Bob Responds     |
+      |                            |  PHASE 3: Bob Responds     |
       |                            |--------------------------->|
       |                            |  If valid:                 |
       |                            |   - Generate ephemeral key |
@@ -64,14 +64,14 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |                            |--------------------------->|
       |                            |  Else: reject handshake    |
       |                            |                            |
-      |  PHASE 5: Alice Receives Response                       |
+      |  PHASE 4: Alice Receives Response                       |
       |<--------------------------|                             |
       |  Listen for HandshakeResponse event                     |
       |  Decrypt response w/ own ephemeral secret               |
       |  Extract Bob's keys & proof                             |
       |  Verify Bob's identity                                  |
       |                                                         |
-      |  PHASE 6: Secure Communication Established              |
+      |  PHASE 5: Secure Communication Established              |
       |--------------------------->|                            |
       |  Store Bob's keys          |                            |
       |  Ongoing:                  |                            |

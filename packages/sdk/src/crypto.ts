@@ -120,7 +120,7 @@ export function decryptHandshakeResponse(
 }
 
 /**
- * 🆕 Convenience function to decrypt handshake response and extract individual keys
+ * Convenience function to decrypt handshake response and extract individual keys
  */
 export function decryptAndExtractHandshakeKeys(
   payloadJson: string,
@@ -130,7 +130,7 @@ export function decryptAndExtractHandshakeKeys(
   signingPubKey: Uint8Array;
   ephemeralPubKey: Uint8Array;
   note?: string;
-  derivationProof: DerivationProof;  // 🆕 Using type from types.ts
+  derivationProof: DerivationProof; 
 } | null {
   const decrypted = decryptHandshakeResponse(payloadJson, initiatorEphemeralSecretKey);
   if (!decrypted) return null;

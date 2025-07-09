@@ -31,7 +31,7 @@ import {
   HandshakeLog,
   HandshakeResponseLog,
 } from "../src/types";
-import { deriveIdentityKeyPairWithProof, deriveIdentityWithUnifiedKeys } from "../src/identity";
+import { deriveIdentityWithUnifiedKeys } from "../src/identity";
 
 const mockProvider = {
   async getCode(address: string) {

@@ -30,7 +30,6 @@ export function split128x128(word: bigint): readonly [bigint, bigint] {
 /*    Helpers for compatibility between AA spec v0.6 and v0.7                 */
 /* -------------------------------------------------------------------------- */
 
-// ► Detects the version from the EntryPoint ABI (v0.7 introduces getAccountGasLimits)
 const detectSpecVersion = (iface: Interface): AASpecVersion => {
   try {
     iface.getFunction("getAccountGasLimits");
@@ -40,7 +39,7 @@ const detectSpecVersion = (iface: Interface): AASpecVersion => {
   }
 };
 
-// ► Automatically transforms all bigints into padded bytes32 (uint256)
+// transforms all bigints into padded bytes32 (uint256)
 const padBigints = <T extends Record<string, any>>(op: T): T => {
   const out: any = { ...op };
   for (const [k, v] of Object.entries(out)) {
@@ -241,7 +240,7 @@ export class DirectEntryPointExecutor implements IExecutor {
     entryPointContract: Contract | BaseContract,
     private logChainAddress: string,
     private smartAccountClient: any,
-    private signer: Signer // direct signer for test transactions
+    private signer: Signer
   ) {
     this.logChainInterface = new Interface([
       "function sendMessage(bytes calldata ciphertext, bytes32 topic, uint256 timestamp, uint256 nonce)",
@@ -255,7 +254,6 @@ export class DirectEntryPointExecutor implements IExecutor {
     ]);
 
     this.entryPointContract = entryPointContract.connect(signer) as Contract;
-    // Auto-detect AA spec version (v0.6 / v0.7)
     this.spec = detectSpecVersion(this.entryPointContract.interface);
   }
 
@@ -369,7 +367,7 @@ export class DirectEntryPointExecutor implements IExecutor {
       } as UserOpV07;
     }
 
-    // Pad bigints → bytes32 before signing
+    // Pad bigints, bytes32 before signing
     const paddedUserOp = padBigints(userOp);
     //console.log("Padded UserOp:", paddedUserOp);
 

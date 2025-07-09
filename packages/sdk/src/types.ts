@@ -13,7 +13,7 @@ export interface HandshakeLog {
   sender: string;
   pubKeys: string; // Unified field (hex string of 65 bytes: version + X25519 + Ed25519)
   ephemeralPubKey: string;
-  plaintextPayload: string; // Now always contains JSON with derivationProof
+  plaintextPayload: string; // always contains JSON with derivationProof
 }
 
 export interface HandshakeResponseLog {
@@ -32,7 +32,7 @@ export interface IdentityKeyPair {
   signingSecretKey: Uint8Array;
 }
 
-// Derivation proof structure (now mandatory in all handshakes)
+// Derivation proof structure
 export interface DerivationProof {
   message: string; // "VerbEth Identity Key Derivation v1\nAddress: ..."
   signature: string; // Ethereum signature of the message
@@ -71,12 +71,3 @@ export interface UserOpV07 extends BaseUserOp {
 
 export type AASpecVersion = "v0.6" | "v0.7";
 export const DEFAULT_AA_VERSION: AASpecVersion = "v0.7";
-
-// ========== NOTES ==========
-//
-// Handshake parsing functions like parseHandshakeKeys() and
-// migrateLegacyHandshakeLog() are available in payload.ts and
-// re-exported from index.ts for convenience.
-//
-// All handshakes now REQUIRE derivationProof in the plaintextPayload.
-// Legacy handshakes without derivationProof will be rejected.

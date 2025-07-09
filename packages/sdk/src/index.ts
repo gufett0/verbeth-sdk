@@ -17,9 +17,7 @@ export {
   createHandshakeResponseContent,
   extractKeysFromHandshakePayload,
   extractKeysFromHandshakeResponse,
-  parseHandshakeKeys,
-  migrateLegacyHandshakeLog,
-  LegacyHandshakeLog
+  parseHandshakeKeys
 } from './payload';
 
 export {

@@ -76,7 +76,6 @@ export async function verifyHandshakeResponseIdentity(
   provider: JsonRpcProvider
 ): Promise<boolean> {
   try {
-    // Decrypt and extract handshake response
     const extractedResponse = decryptAndExtractHandshakeKeys(
       responseEvent.ciphertext,
       initiatorEphemeralSecretKey
@@ -123,9 +122,6 @@ export async function verifyHandshakeResponseIdentity(
 
 // ============= Utility Functions =============
 
-/**
- * convenience function to verify both handshake and extract keys
- */
 export async function verifyAndExtractHandshakeKeys(
   handshakeEvent: HandshakeLog,
   provider: JsonRpcProvider
@@ -153,9 +149,7 @@ export async function verifyAndExtractHandshakeKeys(
   };
 }
 
-/**
- * Convenience function to verify handshake response and extract keys
- */
+
 export async function verifyAndExtractHandshakeResponseKeys(
   responseEvent: HandshakeResponseLog,
   initiatorEphemeralSecretKey: Uint8Array,

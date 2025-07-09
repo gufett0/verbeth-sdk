@@ -125,7 +125,7 @@ export function verifyDerivationProof(
  * Uses ethers verifyMessage which supports EOA signature verification
  */
 export function verifyEOADerivationProof(
-  derivationProof: DerivationProof,  // 🆕 Using type from types.ts
+  derivationProof: DerivationProof, 
   expectedSenderAddress: string,
   expectedUnifiedKeys: {
     identityPubKey: Uint8Array;

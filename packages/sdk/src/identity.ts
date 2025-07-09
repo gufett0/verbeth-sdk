@@ -51,15 +51,6 @@ export async function deriveIdentityKeyPairWithProof(signer: Signer, address: st
     signingSecretKey: signKeyPair.secretKey
   };
   
-  // // Cache in localStorage
-  // const toCache = {
-  //   publicKey: Array.from(result.publicKey),
-  //   secretKey: Array.from(result.secretKey),
-  //   signingPublicKey: Array.from(result.signingPublicKey),
-  //   signingSecretKey: Array.from(result.signingSecretKey)
-  // };
-  // localStorage.setItem(`verbeth_identity_${address.toLowerCase()}`, JSON.stringify(toCache));
-  
   return {
     keyPair: result,
     derivationProof: {

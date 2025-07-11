@@ -1,6 +1,5 @@
 // tests/messaging.test.ts
-// This file contains integration tests for secure messaging after handshake completion (Phase 5)
-// Tests both simple convenience API and advanced structured API
+// This file contains integration tests for secure messaging after handshake completion
 import { expect, describe, it, beforeAll, afterAll } from "vitest";
 import {
   JsonRpcProvider,
@@ -816,7 +815,6 @@ describe("Smart Account Secure Messaging (Phase 5)", () => {
       let simpleDecrypted: string | null = null;
       let structuredDecrypted: MessagePayload | null = null;
 
-      // Process simple message
       let simpleCiphertextJson = simpleEvent!.args.ciphertext;
       if (
         typeof simpleEvent!.args.ciphertext === "string" &&
@@ -830,7 +828,6 @@ describe("Smart Account Secure Messaging (Phase 5)", () => {
         }
       }
 
-      // Process structured message
       let structuredCiphertextJson = structuredEvent!.args.ciphertext;
       if (
         typeof structuredEvent!.args.ciphertext === "string" &&

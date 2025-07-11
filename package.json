@@ -2,9 +2,8 @@
   "name": "verbeth-sdk",
   "private": true,
   "scripts": {
-    "test:integration": "./packages/sdk/node_modules/.bin/vitest run tests/handshaking.test.ts --config vitest.integration.config.mjs",
-    "test:integration:msg": "./packages/sdk/node_modules/.bin/vitest run tests/messaging.test.ts --config vitest.integration.config.mjs",
-    "test:integration:watch": "./packages/sdk/node_modules/.bin/vitest tests/handshaking.test.ts --config vitest.integration.config.mjs",
+    "test:integration": "./packages/sdk/node_modules/.bin/vitest run tests/*.test.ts --config vitest.integration.config.mjs",
+    "test:integration:watch": "./packages/sdk/node_modules/.bin/vitest tests/*.test.ts --config vitest.integration.config.mjs",
     "test:unit": "cd packages/sdk && npm run test",
     "test:contracts": "cd packages/contracts && npm run test",
     "test": "npm run test:unit && npm run test:contracts && npm run test:integration",

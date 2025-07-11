@@ -10,6 +10,8 @@ export * from './executor';
 
 export { decryptMessage as decryptLog } from './crypto';
 
+export { getNextNonce } from './utils/nonce';
+
 export {
   encodeUnifiedPubKeys,
   decodeUnifiedPubKeys,

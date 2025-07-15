@@ -1,9 +1,9 @@
-// apps/demo/src/utils/identityKeys.ts
-
 import { sha256 } from '@noble/hashes/sha256';
 import { hkdf } from '@noble/hashes/hkdf';
 import { Signer } from 'ethers';
 import nacl from 'tweetnacl';
+import { encodeUnifiedPubKeys } from './payload.js';
+import { DerivationProof } from './types.js';
 
 interface IdentityKeyPair {
   // X25519 keys per encryption/decryption
@@ -17,21 +17,16 @@ interface IdentityKeyPair {
 /**
  * Derives deterministic X25519 + Ed25519 keypairs from an Ethereum wallet
  * Uses HKDF (RFC 5869) for secure key derivation from wallet signature
+ * It also returns derivation proof to verify the keypair was derived from the wallet address.
  */
-export async function deriveIdentityKeyPair(signer: Signer, address: string): Promise<IdentityKeyPair> {
-  // Check if already cached in localStorage
-  const cached = localStorage.getItem(`verbeth_identity_${address.toLowerCase()}`);
-  if (cached) {
-    const parsed = JSON.parse(cached);
-    return {
-      publicKey: new Uint8Array(parsed.publicKey),
-      secretKey: new Uint8Array(parsed.secretKey),
-      signingPublicKey: new Uint8Array(parsed.signingPublicKey),
-      signingSecretKey: new Uint8Array(parsed.signingSecretKey)
-    };
-  }
-
-  // Generate deterministic seed from wallet signature
+export async function deriveIdentityKeyPairWithProof(signer: Signer, address: string): Promise<{
+  keyPair: IdentityKeyPair;
+  derivationProof: {
+    message: string;
+    signature: string;
+  };
+}> {
+  // deterministic seed from wallet signature
   const message = `VerbEth Identity Key Derivation v1\nAddress: ${address.toLowerCase()}`;
   const signature = await signer.signMessage(message);
   
@@ -56,21 +51,35 @@ export async function deriveIdentityKeyPair(signer: Signer, address: string): Pr
     signingSecretKey: signKeyPair.secretKey
   };
   
-  // Cache in localStorage
-  const toCache = {
-    publicKey: Array.from(result.publicKey),
-    secretKey: Array.from(result.secretKey),
-    signingPublicKey: Array.from(result.signingPublicKey),
-    signingSecretKey: Array.from(result.signingSecretKey)
+  return {
+    keyPair: result,
+    derivationProof: {
+      message,
+      signature
+    }
   };
-  localStorage.setItem(`verbeth_identity_${address.toLowerCase()}`, JSON.stringify(toCache));
-  
-  return result;
 }
 
-/**
- * Clears cached identity keys (useful for logout)
- */
-export function clearIdentityKeys(address: string) {
-  localStorage.removeItem(`verbeth_identity_${address.toLowerCase()}`);
+export async function deriveIdentityWithUnifiedKeys(
+  signer: Signer, 
+  address: string
+): Promise<{
+  derivationProof: DerivationProof;
+  identityPubKey: Uint8Array;
+  signingPubKey: Uint8Array;
+  unifiedPubKeys: Uint8Array;
+}> {
+  const result = await deriveIdentityKeyPairWithProof(signer, address);
+
+  const unifiedPubKeys = encodeUnifiedPubKeys(
+    result.keyPair.publicKey,        // X25519
+    result.keyPair.signingPublicKey  // Ed25519
+  );
+
+  return {
+    derivationProof: result.derivationProof,
+    identityPubKey: result.keyPair.publicKey,
+    signingPubKey: result.keyPair.signingPublicKey,
+    unifiedPubKeys,
+  };
 }

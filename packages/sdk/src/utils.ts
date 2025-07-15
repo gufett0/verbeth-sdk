@@ -1,11 +1,15 @@
+// packages/sdk/src/utils.ts
+
 import { 
-  getBytes, 
-  Transaction, 
-  SigningKey, 
   Contract,
-  JsonRpcProvider
+  JsonRpcProvider,
+  verifyMessage,
+  hashMessage  
 } from "ethers";
-import { convertPublicKeyToX25519 } from './utils/x25519';
+import { sha256 } from '@noble/hashes/sha256';
+import { hkdf } from '@noble/hashes/hkdf';
+import nacl from 'tweetnacl';
+import { DerivationProof } from './types.js';
 
 /**
  * Generalized EIP-1271 signature verification
@@ -33,8 +37,8 @@ export async function verifyEIP1271Signature(
 }
 
 /**
- * Checks if an address is a smart contract
- * Returns true if the address has deployed code
+ * Checks if an address is a smart contract that supports EIP-1271 signature verification
+ * Returns true if the address has deployed code AND implements isValidSignature function
  */
 export async function isSmartContract(
   address: string, 
@@ -42,53 +46,170 @@ export async function isSmartContract(
 ): Promise<boolean> {
   try {
     const code = await provider.getCode(address);
-    return code !== "0x";
+    
+    if (code === "0x") {
+      return false;
+    }
+    
+    try {
+      const contract = new Contract(
+        address,
+        ["function isValidSignature(bytes32, bytes) external view returns (bytes4)"],
+        provider
+      );
+      
+      await contract.isValidSignature.staticCall(
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "0x"
+      );
+      
+      return true;
+    } catch (err) {
+      // the contract doesn't support EIP-1271
+      return false;
+    }
   } catch (err) {
     console.error("Error checking if address is smart contract:", err);
     return false;
   }
 }
 
+
 /**
- * Verifies that an identity public key matches the signer of a transaction
- * Useful for verifying EOA identity in handshakes/responses
+ * Verifies derivation proof and re-derives unified keys
+ * This is the core verification function for the new unified keys system
  */
-export function verifyEOAIdentity(
-  rawTxHex: string,
-  expectedIdentityPubKey: Uint8Array
+export function verifyDerivationProof(
+  derivationProof: DerivationProof,
+  expectedSenderAddress: string,
+  expectedUnifiedKeys: {
+    identityPubKey: Uint8Array;
+    signingPubKey: Uint8Array;
+  }
 ): boolean {
   try {
-    if (!rawTxHex || rawTxHex.trim() === "" || rawTxHex === "0x") {
+    // 1. Verify the derivation signature was created by the expected address
+    const recoveredAddress = verifyMessage(
+      derivationProof.message,
+      derivationProof.signature
+    );
+    
+    if (recoveredAddress.toLowerCase() !== expectedSenderAddress.toLowerCase()) {
+      console.error("Derivation signature doesn't match expected sender");
+      console.error("  Expected:", expectedSenderAddress);
+      console.error("  Got:", recoveredAddress);
       return false;
     }
-
-    const parsedTx = Transaction.from(rawTxHex);
-    const digest = parsedTx.unsignedHash;
-    const sig = parsedTx.signature;
-
-    if (!sig) {
-      throw new Error("Invalid or missing signature in parsed transaction");
-    }
-
-    const secpPubKey = SigningKey.recoverPublicKey(digest, sig);
-    if (!secpPubKey || !secpPubKey.startsWith("0x04")) {
-      throw new Error("Invalid or missing public key in parsed transaction");
-    }
-
-    const pubkeyBytes = getBytes(secpPubKey).slice(1);
-    if (pubkeyBytes.length !== 64) {
-      throw new Error(
-        `Expected 64 bytes after removing prefix, got ${pubkeyBytes.length}`
-      );
-    }
-
-    const derivedX25519 = convertPublicKeyToX25519(pubkeyBytes);
     
-    return Buffer.from(derivedX25519).equals(Buffer.from(expectedIdentityPubKey));
-  } catch (err) {
-    if (rawTxHex && rawTxHex.trim() !== "" && rawTxHex !== "0x") {
-      console.error("verifyEOAIdentity error:", err);
+    // 2. Re-derive keys using the provided signature
+    const ikm = sha256(derivationProof.signature);
+    const salt = new Uint8Array(32);
+    
+    // Re-derive X25519 keys
+    const info_x25519 = new TextEncoder().encode("verbeth-x25519-v1");
+    const keyMaterial_x25519 = hkdf(sha256, ikm, salt, info_x25519, 32);
+    const boxKeyPair = nacl.box.keyPair.fromSecretKey(keyMaterial_x25519);
+    
+    // Re-derive Ed25519 keys
+    const info_ed25519 = new TextEncoder().encode("verbeth-ed25519-v1");
+    const keyMaterial_ed25519 = hkdf(sha256, ikm, salt, info_ed25519, 32);
+    const signKeyPair = nacl.sign.keyPair.fromSeed(keyMaterial_ed25519);
+    
+    // 3. Compare re-derived keys with expected keys
+    const identityMatches = Buffer.from(boxKeyPair.publicKey).equals(
+      Buffer.from(expectedUnifiedKeys.identityPubKey)
+    );
+    
+    const signingMatches = Buffer.from(signKeyPair.publicKey).equals(
+      Buffer.from(expectedUnifiedKeys.signingPubKey)
+    );
+    
+    if (!identityMatches) {
+      console.error("Re-derived X25519 identity key doesn't match expected");
+      return false;
     }
+    
+    if (!signingMatches) {
+      console.error("Re-derived Ed25519 signing key doesn't match expected");
+      return false;
+    }
+    
+    return true;
+    
+  } catch (err) {
+    console.error("verifyDerivationProof error:", err);
+    return false;
+  }
+}
+
+/**
+ * Verifies derivation proof for EOA addresses
+ * Uses ethers verifyMessage which supports EOA signature verification
+ */
+export function verifyEOADerivationProof(
+  derivationProof: DerivationProof, 
+  expectedSenderAddress: string,
+  expectedUnifiedKeys: {
+    identityPubKey: Uint8Array;
+    signingPubKey: Uint8Array;
+  }
+): boolean {
+  return verifyDerivationProof(derivationProof, expectedSenderAddress, expectedUnifiedKeys);
+}
+
+/**
+ * Verifies derivation proof for Smart Account addresses
+ * Uses EIP-1271 for smart contract signature verification
+ */
+export async function verifySmartAccountDerivationProof(
+  derivationProof: DerivationProof,  
+  smartAccountAddress: string,
+  expectedUnifiedKeys: {
+    identityPubKey: Uint8Array;
+    signingPubKey: Uint8Array;
+  },
+  provider: JsonRpcProvider
+): Promise<boolean> {
+  try {
+    // 1. Verify using EIP-1271
+    const messageHash = hashMessage(derivationProof.message);
+    const isValidSignature = await verifyEIP1271Signature(
+      smartAccountAddress,
+      messageHash,
+      derivationProof.signature,
+      provider
+    );
+    
+    if (!isValidSignature) {
+      console.error("Smart account signature verification failed");
+      return false;
+    }
+    
+    // 2. Re-derive keys (same process as EOA)
+    const ikm = sha256(derivationProof.signature);
+    const salt = new Uint8Array(32);
+    
+    const info_x25519 = new TextEncoder().encode("verbeth-x25519-v1");
+    const keyMaterial_x25519 = hkdf(sha256, ikm, salt, info_x25519, 32);
+    const boxKeyPair = nacl.box.keyPair.fromSecretKey(keyMaterial_x25519);
+    
+    const info_ed25519 = new TextEncoder().encode("verbeth-ed25519-v1");
+    const keyMaterial_ed25519 = hkdf(sha256, ikm, salt, info_ed25519, 32);
+    const signKeyPair = nacl.sign.keyPair.fromSeed(keyMaterial_ed25519);
+    
+    // 3. Compare keys
+    const identityMatches = Buffer.from(boxKeyPair.publicKey).equals(
+      Buffer.from(expectedUnifiedKeys.identityPubKey)
+    );
+    
+    const signingMatches = Buffer.from(signKeyPair.publicKey).equals(
+      Buffer.from(expectedUnifiedKeys.signingPubKey)
+    );
+    
+    return identityMatches && signingMatches;
+    
+  } catch (err) {
+    console.error("verifySmartAccountDerivationProof error:", err);
     return false;
   }
 }

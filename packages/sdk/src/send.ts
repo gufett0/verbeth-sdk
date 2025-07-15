@@ -1,21 +1,29 @@
+// packages/sdk/src/send.ts
+
 import { 
   keccak256,
   toUtf8Bytes,
   hexlify,
-  solidityPacked,
   Signer
 } from "ethers";
-import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
-import { getNextNonce } from './utils/nonce';
-import { encryptMessage, encryptStructuredPayload } from './crypto';
+import { getNextNonce } from './utils/nonce.js';
+import { encryptMessage, encryptStructuredPayload } from './crypto.js';
+import { 
+  HandshakeContent, 
+  serializeHandshakeContent,
+  encodeUnifiedPubKeys,
+  createHandshakeResponseContent
+} from './payload.js';
+import { IdentityKeyPair, DerivationProof } from './types.js';  
+import { IExecutor } from './executor.js';
 import nacl from 'tweetnacl';
-import { HandshakeResponseContent, HandshakeContent, serializeHandshakeContent } from './payload';
 
 /**
- * Sends an encrypted message assuming recipient's pubkey was already obtained via handshake
+ * Sends an encrypted message assuming recipient's keys were already obtained via handshake.
+ * Executor-agnostic: works with EOA, UserOp, and Direct EntryPoint (for tests)
  */
 export async function sendEncryptedMessage({
-  contract,
+  executor,
   topic,
   message,
   recipientPubKey,
@@ -23,134 +31,128 @@ export async function sendEncryptedMessage({
   senderSignKeyPair,
   timestamp
 }: {
-  contract: LogChainV1;
+  executor: IExecutor;
   topic: string;
   message: string;
-  recipientPubKey: Uint8Array;
+  recipientPubKey: Uint8Array;          // X25519 key for encryption
   senderAddress: string;
-  senderSignKeyPair: nacl.SignKeyPair;
+  senderSignKeyPair: nacl.SignKeyPair;  // Ed25519 keys for signing
   timestamp: number;
 }) {
+  if (!executor) {
+    throw new Error("Executor must be provided");
+  }
+
   const ephemeralKeyPair = nacl.box.keyPair();
 
   const ciphertext = encryptMessage(
     message,
-    recipientPubKey,
+    recipientPubKey,                      // X25519 for encryption
     ephemeralKeyPair.secretKey,
     ephemeralKeyPair.publicKey,
-    senderSignKeyPair.secretKey,
+    senderSignKeyPair.secretKey,          // Ed25519 for signing
     senderSignKeyPair.publicKey
   );
 
   const nonce = getNextNonce(senderAddress, topic);
 
-  return contract.sendMessage(toUtf8Bytes(ciphertext), topic, timestamp, nonce);
+  return executor.sendMessage(toUtf8Bytes(ciphertext), topic, timestamp, nonce);
 }
 
 /**
- * Initiates an on-chain handshake with a recipient.
+ * Initiates an on-chain handshake with unified keys and mandatory identity proof.
+ * Executor-agnostic: works with EOA, UserOp, and Direct EntryPoint (for tests)
  */
 export async function initiateHandshake({
-  contract,
+  executor,
   recipientAddress,
-  identityPubKey,
+  identityKeyPair,
   ephemeralPubKey,
   plaintextPayload,
-  includeIdentityProof = false,
+  derivationProof,
   signer
 }: {
-  contract: LogChainV1;
+  executor: IExecutor;
   recipientAddress: string;
-  identityPubKey: Uint8Array;         // x25519 pubkey
-  ephemeralPubKey: Uint8Array;        // Ephemeral pubkey used for this handshake
-  plaintextPayload: string;           // plaintext message (e.g., "hello")
-  includeIdentityProof?: boolean;  // Nuovo optional
-  signer?: Signer;                // Nuovo optional
+  identityKeyPair: IdentityKeyPair;
+  ephemeralPubKey: Uint8Array;
+  plaintextPayload: string;
+  derivationProof: DerivationProof;
+  signer: Signer;
 }) {
+  if (!executor) {
+    throw new Error("Executor must be provided");
+  }
+
   const recipientHash = keccak256(
     toUtf8Bytes('contact:' + recipientAddress.toLowerCase())
   );
 
   const handshakeContent: HandshakeContent = {
-    plaintextPayload
+    plaintextPayload,
+    derivationProof
   };
-
-  if (includeIdentityProof && signer) {
-    const bindingMessage = solidityPacked( 
-      ['bytes32', 'bytes32', 'string'],
-      [identityPubKey, recipientHash, 'VerbEth-Handshake-v1']
-    );
-    
-    const signature = await signer.signMessage(bindingMessage);
-    handshakeContent.identityProof = {
-      signature,
-      message: keccak256(bindingMessage)
-    };
-  }
 
   const serializedPayload = serializeHandshakeContent(handshakeContent);
 
+  // Create unified pubKeys (65 bytes: version + X25519 + Ed25519)
+  const unifiedPubKeys = encodeUnifiedPubKeys(
+    identityKeyPair.publicKey,        // X25519 for encryption
+    identityKeyPair.signingPublicKey  // Ed25519 for signing
+  );
 
-  return await contract.initiateHandshake(
+  return await executor.initiateHandshake(
     recipientHash,
-    hexlify(identityPubKey), 
+    hexlify(unifiedPubKeys),
     hexlify(ephemeralPubKey),
     toUtf8Bytes(serializedPayload)
   );
 }
 
 /**
- * Responds to a handshake by encrypting the responder's keys for the initiator
+ * Responds to a handshake with unified keys and mandatory identity proof.
+ * Executor-agnostic: works with EOA, UserOp, and Direct EntryPoint (for tests)
  */
 export async function respondToHandshake({
-  contract,
+  executor,
   inResponseTo,
   initiatorPubKey,
-  responderIdentityPubKey,
+  responderIdentityKeyPair,
   responderEphemeralKeyPair,
   note,
-  signer,
-  includeIdentityProof = false
+  derivationProof,
+  signer
 }: {
-  contract: LogChainV1;
+  executor: IExecutor;
   inResponseTo: string;
   initiatorPubKey: Uint8Array;
-  responderIdentityPubKey: Uint8Array;
+  responderIdentityKeyPair: IdentityKeyPair;
   responderEphemeralKeyPair?: nacl.BoxKeyPair;
   note?: string;
-  signer?: Signer; 
-  includeIdentityProof?: boolean;
+  derivationProof: DerivationProof;
+  signer: Signer;
 }) {
+  if (!executor) {
+    throw new Error("Executor must be provided");
+  }
+
   const ephemeralKeyPair = responderEphemeralKeyPair || nacl.box.keyPair();
   
-  let identityProof;
-  if (includeIdentityProof && signer) {
-    const bindingMessage = solidityPacked(
-      ['bytes32', 'bytes32', 'string'],
-      [responderIdentityPubKey, inResponseTo, 'VerbEth-HSResponse-v1']
-    );
-    
-    const signature = await signer.signMessage(bindingMessage);
-    identityProof = {
-      signature,
-      message: keccak256(bindingMessage)
-    };
-  }
-  
-  const responseContent: HandshakeResponseContent = {
-    identityPubKey: responderIdentityPubKey,
-    ephemeralPubKey: ephemeralKeyPair.publicKey,
+  const responseContent = createHandshakeResponseContent(
+    responderIdentityKeyPair.publicKey,        // X25519
+    responderIdentityKeyPair.signingPublicKey, // Ed25519
+    ephemeralKeyPair.publicKey,
     note,
-    identityProof
-  };
+    derivationProof
+  );
   
-  // Use the unified encryption for structured payloads
+  // Encrypt the response for the initiator
   const payload = encryptStructuredPayload(
     responseContent,
-    initiatorPubKey,
+    initiatorPubKey,              // Encrypt to initiator's X25519 key
     ephemeralKeyPair.secretKey,
     ephemeralKeyPair.publicKey
   );
   
-  return contract.respondToHandshake(inResponseTo, toUtf8Bytes(payload));
+  return executor.respondToHandshake(inResponseTo, toUtf8Bytes(payload));
 }

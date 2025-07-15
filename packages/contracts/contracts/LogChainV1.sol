@@ -33,14 +33,14 @@ contract LogChainV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
      * @dev Emitted when initiating a handshake with a recipient
      * @param recipientHash Keccak256 hash of "contact:" + recipient's lowercase address
      * @param sender The address initiating the handshake
-     * @param identityPubKey The sender's long-term X25519 public key (32 bytes)
+     * @param pubKeys The sender's long-term singing and identity pubkeys (32 bytes each)
      * @param ephemeralPubKey Fresh public key generated for this specific handshake
      * @param plaintextPayload Human-readable message or JSON with optional identity proof
      */
     event Handshake(
         bytes32 indexed recipientHash,
         address indexed sender,
-        bytes identityPubKey,
+        bytes pubKeys,
         bytes ephemeralPubKey,
         bytes plaintextPayload
     );
@@ -103,7 +103,7 @@ contract LogChainV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
     /**
      * @dev Initiates a secure handshake with a recipient
      * @param recipientHash Keccak256("contact:" + recipient.toLowerCase())
-     * @param identityPubKey Sender's long-term X25519 public key (32 bytes)
+     * @param pubKeys Sender's long-term X25519 public key (32 bytes)
      * @param ephemeralPubKey Fresh X25519 public key for this handshake (32 bytes)
      * @param plaintextPayload Human-readable greeting or JSON with identity proof
      * 
@@ -112,11 +112,11 @@ contract LogChainV1 is Initializable, UUPSUpgradeable, OwnableUpgradeable {
      */
     function initiateHandshake(
         bytes32 recipientHash,
-        bytes calldata identityPubKey,
+        bytes calldata pubKeys,
         bytes calldata ephemeralPubKey,
         bytes calldata plaintextPayload
     ) external {
-        emit Handshake(recipientHash, msg.sender, identityPubKey, ephemeralPubKey, plaintextPayload);
+        emit Handshake(recipientHash, msg.sender, pubKeys, ephemeralPubKey, plaintextPayload);
     }
 
     /**

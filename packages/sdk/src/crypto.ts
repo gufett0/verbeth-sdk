@@ -1,3 +1,5 @@
+// packages/sdk/src/crypto.ts
+
 import nacl from 'tweetnacl';
 import { 
   encodePayload, 
@@ -5,8 +7,10 @@ import {
   encodeStructuredContent,
   decodeStructuredContent,
   MessagePayload,
-  HandshakeResponseContent
-} from './payload';
+  HandshakeResponseContent,
+  extractKeysFromHandshakeResponse
+} from './payload.js';
+import { DerivationProof } from './types.js'; 
 
 /**
  * Encrypts a structured payload (JSON-serializable objects)
@@ -91,6 +95,9 @@ export function decryptMessage(
   return result ? result.content : null;
 }
 
+/**
+ * Decrypts handshake response and extracts individual keys from unified format
+ */
 export function decryptHandshakeResponse(
   payloadJson: string,
   initiatorEphemeralSecretKey: Uint8Array
@@ -98,11 +105,44 @@ export function decryptHandshakeResponse(
   return decryptStructuredPayload(
     payloadJson,
     initiatorEphemeralSecretKey,
-    (obj) => ({
-      identityPubKey: Uint8Array.from(Buffer.from(obj.identityPubKey, 'base64')),
-      ephemeralPubKey: Uint8Array.from(Buffer.from(obj.ephemeralPubKey, 'base64')),
-      note: obj.note,
-      identityProof: obj.identityProof
-    })
+    (obj) => {
+      if (!obj.derivationProof) {
+        throw new Error("Invalid handshake response: missing derivationProof");
+      }
+      return {
+        unifiedPubKeys: Uint8Array.from(Buffer.from(obj.unifiedPubKeys, 'base64')),
+        ephemeralPubKey: Uint8Array.from(Buffer.from(obj.ephemeralPubKey, 'base64')),
+        note: obj.note,
+        derivationProof: obj.derivationProof
+      };
+    }
   );
+}
+
+/**
+ * Convenience function to decrypt handshake response and extract individual keys
+ */
+export function decryptAndExtractHandshakeKeys(
+  payloadJson: string,
+  initiatorEphemeralSecretKey: Uint8Array
+): {
+  identityPubKey: Uint8Array;
+  signingPubKey: Uint8Array;
+  ephemeralPubKey: Uint8Array;
+  note?: string;
+  derivationProof: DerivationProof; 
+} | null {
+  const decrypted = decryptHandshakeResponse(payloadJson, initiatorEphemeralSecretKey);
+  if (!decrypted) return null;
+  
+  const extracted = extractKeysFromHandshakeResponse(decrypted);
+  if (!extracted) return null;
+  
+  return {
+    identityPubKey: extracted.identityPubKey,
+    signingPubKey: extracted.signingPubKey,
+    ephemeralPubKey: extracted.ephemeralPubKey,
+    note: decrypted.note,
+    derivationProof: decrypted.derivationProof
+  };
 }

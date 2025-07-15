@@ -3,6 +3,10 @@
   "include": ["src", "test"],
   "compilerOptions": {
     "outDir": "dist",
-    "rootDir": "."
+    "rootDir": ".",
+    "declaration": true,
+    "declarationMap": true,
+    "module": "node16",
+    "target": "ES2020"
   }
 }

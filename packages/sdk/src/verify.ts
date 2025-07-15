@@ -1,134 +1,195 @@
+// packages/sdk/src/verify.ts
 import { 
-  getBytes, 
   JsonRpcProvider
 } from "ethers";
-import { decryptHandshakeResponse } from "./crypto";
-import { HandshakeLog, HandshakeResponseLog } from "./types";
-import { parseHandshakePayload } from "./payload";
-import { verifyEIP1271Signature, isSmartContract, verifyEOAIdentity } from "./utils"
+import { decryptAndExtractHandshakeKeys } from "./crypto.js";
+import { HandshakeLog, HandshakeResponseLog } from "./types.js";
+import { parseHandshakePayload, parseHandshakeKeys } from "./payload.js";
+import { 
+  verifyEOADerivationProof, 
+  verifySmartAccountDerivationProof, 
+  isSmartContract 
+} from "./utils.js";
 
 // ============= Handshake Verification =============
 
 /**
- * Unified handshake identity verification (supports both EOA and Smart Account)
+ * handshake verification with mandatory derivation proof
  */
 export async function verifyHandshakeIdentity(
   handshakeEvent: HandshakeLog,
-  rawTxHex?: string,
-  provider?: JsonRpcProvider
+  provider: JsonRpcProvider
 ): Promise<boolean> {
-  // Parse payload to check for identity proof
-  const content = parseHandshakePayload(handshakeEvent.plaintextPayload);
-  
-  // Verify identity key matches sender's pubkey derived from transaction
-  const identityPubKey = getBytes(handshakeEvent.identityPubKey);
-  
-  // If no proof provided, assume EOA and verify via transaction
-  if (!content.identityProof) {
-    if (!rawTxHex) {
-      console.warn("No raw transaction provided for EOA verification");
+  try {
+    let plaintextPayload = handshakeEvent.plaintextPayload;
+    
+    if (typeof plaintextPayload === 'string' && plaintextPayload.startsWith('0x')) {
+      try {
+        const bytes = new Uint8Array(Buffer.from(plaintextPayload.slice(2), 'hex'));
+        plaintextPayload = new TextDecoder().decode(bytes);
+      } catch (err) {
+        console.error("Failed to decode hex payload:", err);
+        return false;
+      }
+    }
+    
+    const content = parseHandshakePayload(plaintextPayload);
+    
+    const parsedKeys = parseHandshakeKeys(handshakeEvent);
+    if (!parsedKeys) {
+      console.error("Failed to parse unified pubKeys from handshake event");
       return false;
     }
-    return verifyEOAIdentity(rawTxHex, identityPubKey);
-  }
-  
-  if (!provider) {
-    console.warn("No provider provided for Smart Account verification");
+    
+    const isContract = await isSmartContract(handshakeEvent.sender, provider);
+    
+    if (isContract) {
+      return await verifySmartAccountDerivationProof(
+        content.derivationProof,
+        handshakeEvent.sender,
+        parsedKeys,
+        provider
+      );
+    } else {
+      return verifyEOADerivationProof(
+        content.derivationProof,
+        handshakeEvent.sender,
+        parsedKeys
+      );
+    }
+    
+  } catch (err) {
+    console.error("verifyHandshakeIdentity error:", err);
     return false;
   }
-  
-  const isContract = await isSmartContract(handshakeEvent.sender, provider);
-  if (!isContract) {
-    console.error("Identity proof provided but sender is not a smart contract");
-    return false;
-  }
-  
-  return verifyEIP1271Signature(
-    handshakeEvent.sender,
-    content.identityProof.message,
-    content.identityProof.signature,
-    provider
-  );
 }
 
 // ============= HandshakeResponse Verification =============
 
 /**
- * Unified handshake response identity verification
+ * handshake response verification with mandatory derivation proof
  */
 export async function verifyHandshakeResponseIdentity(
-  rawTxHex: string,
-  responseEvent: HandshakeResponseLog,
-  responderIdentityPubKey: Uint8Array,
-  initiatorEphemeralSecretKey: Uint8Array,
-  provider?: JsonRpcProvider
-): Promise<boolean> {
-  // First try EOA verification
-  const eoaResult = verifyEOAIdentity(rawTxHex, responderIdentityPubKey);
-  
-  if (eoaResult) {
-    return true;
-  }
-
-  if (!provider) {
-    return false;
-  }
-  
-  const isContract = await isSmartContract(responseEvent.responder, provider);
-  if (!isContract) {
-    return false;
-  }
-
-  // Verify Smart Account response
-  return verifySmartAccountHandshakeResponse(
-    responseEvent,
-    responderIdentityPubKey,
-    initiatorEphemeralSecretKey,
-    provider
-  );
-}
-
-/**
- * Verifies smart account handshake response using EIP-1271
- */
-async function verifySmartAccountHandshakeResponse(
   responseEvent: HandshakeResponseLog,
   responderIdentityPubKey: Uint8Array,
   initiatorEphemeralSecretKey: Uint8Array,
   provider: JsonRpcProvider
 ): Promise<boolean> {
   try {
-    const bytesData = getBytes(responseEvent.ciphertext);
-    const jsonString = new TextDecoder().decode(bytesData);
-    const responseContent = decryptHandshakeResponse(
-      jsonString,
+    const extractedResponse = decryptAndExtractHandshakeKeys(
+      responseEvent.ciphertext,
       initiatorEphemeralSecretKey
     );
 
-    if (!responseContent) {
+    if (!extractedResponse) {
       console.error("Failed to decrypt handshake response");
       return false;
     }
 
-    // Verify the identity key matches
-    if (!Buffer.from(responseContent.identityPubKey).equals(Buffer.from(responderIdentityPubKey))) {
-      console.error("Identity public key mismatch");
+    // Verify the identity key matches expected
+    if (!Buffer.from(extractedResponse.identityPubKey).equals(Buffer.from(responderIdentityPubKey))) {
+      console.error("Identity public key mismatch in handshake response");
       return false;
     }
 
-    if (!responseContent.identityProof) {
-      console.warn("No identity proof found for smart account");
-      return false;
-    }
+    const isContract = await isSmartContract(responseEvent.responder, provider);
 
-    return verifyEIP1271Signature(
-      responseEvent.responder,
-      responseContent.identityProof.message,
-      responseContent.identityProof.signature,
-      provider
-    );
+    const expectedKeys = {
+      identityPubKey: extractedResponse.identityPubKey,
+      signingPubKey: extractedResponse.signingPubKey
+    };
+    
+    if (isContract) {
+      return await verifySmartAccountDerivationProof(
+        extractedResponse.derivationProof,
+        responseEvent.responder,
+        expectedKeys,
+        provider
+      );
+    } else {
+      return verifyEOADerivationProof(
+        extractedResponse.derivationProof,
+        responseEvent.responder,
+        expectedKeys
+      );
+    }
+    
   } catch (err) {
-    console.error("verifySmartAccountHandshakeResponse error:", err);
+    console.error("verifyHandshakeResponseIdentity error:", err);
     return false;
   }
+}
+
+// ============= Utility Functions =============
+
+export async function verifyAndExtractHandshakeKeys(
+  handshakeEvent: HandshakeLog,
+  provider: JsonRpcProvider
+): Promise<{
+  isValid: boolean;
+  keys?: {
+    identityPubKey: Uint8Array;
+    signingPubKey: Uint8Array;
+  };
+}> {
+  const isValid = await verifyHandshakeIdentity(handshakeEvent, provider);
+  
+  if (!isValid) {
+    return { isValid: false };
+  }
+  
+  const parsedKeys = parseHandshakeKeys(handshakeEvent);
+  if (!parsedKeys) {
+    return { isValid: false };
+  }
+  
+  return {
+    isValid: true,
+    keys: parsedKeys
+  };
+}
+
+
+export async function verifyAndExtractHandshakeResponseKeys(
+  responseEvent: HandshakeResponseLog,
+  initiatorEphemeralSecretKey: Uint8Array,
+  provider: JsonRpcProvider
+): Promise<{
+  isValid: boolean;
+  keys?: {
+    identityPubKey: Uint8Array;
+    signingPubKey: Uint8Array;
+    ephemeralPubKey: Uint8Array;
+    note?: string;
+  };
+}> {
+  const extractedResponse = decryptAndExtractHandshakeKeys(
+    responseEvent.ciphertext,
+    initiatorEphemeralSecretKey
+  );
+
+  if (!extractedResponse) {
+    return { isValid: false };
+  }
+
+  const isValid = await verifyHandshakeResponseIdentity(
+    responseEvent,
+    extractedResponse.identityPubKey,
+    initiatorEphemeralSecretKey,
+    provider
+  );
+  
+  if (!isValid) {
+    return { isValid: false };
+  }
+  
+  return {
+    isValid: true,
+    keys: {
+      identityPubKey: extractedResponse.identityPubKey,
+      signingPubKey: extractedResponse.signingPubKey,
+      ephemeralPubKey: extractedResponse.ephemeralPubKey,
+      note: extractedResponse.note
+    }
+  };
 }

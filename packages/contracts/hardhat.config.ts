@@ -13,9 +13,10 @@ const config: HardhatUserConfig = {
   solidity: {
     compilers: [
       {
-        version: "0.8.24", 
+        version: "0.8.28", 
         settings: {
           optimizer: { enabled: true, runs: 200 },
+          evmVersion: 'cancun'
         },
       },
     ],
@@ -23,12 +24,12 @@ const config: HardhatUserConfig = {
   networks: {
     baseSepolia: {
       url: "https://base-sepolia-rpc.publicnode.com",
-      accounts: [`${process.env.PRIVATE_KEY}`],
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
       timeout: 60000,
     },
     base: {
       url: "https://1rpc.io/base",
-      accounts: [`${process.env.PRIVATE_KEY}`],
+      accounts: process.env.PRIVATE_KEY ? [process.env.PRIVATE_KEY] : [],
       timeout: 60000,
     },
     localhost: {
@@ -62,7 +63,8 @@ const config: HardhatUserConfig = {
   dependencyCompiler: {
     paths: [
       "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol",
-      "test/contracts/TestSmartAccount.sol",
+      "@account-abstraction/contracts/core/EntryPoint.sol",
+      "test/contracts/TestSmartAccount.sol"     
     ]
   }
 };

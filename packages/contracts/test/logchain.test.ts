@@ -45,23 +45,24 @@ describe("LogChain", () => {
       ethers.toUtf8Bytes("contact:" + recipient.toLowerCase())
     );
 
-    const identityPubKey = ethers.hexlify(ethers.randomBytes(32));
+    const unifiedPubKeys = ethers.hexlify(ethers.randomBytes(65)); // 1 byte version + 32 bytes X25519 + 32 bytes Ed25519 = 65 bytes
     const ephemeralPubKey = ethers.hexlify(ethers.randomBytes(32));
     const plaintextPayload = ethers.toUtf8Bytes("Hi Bob, respond pls");
 
     await expect(
       logChain.initiateHandshake(
         recipientHash,
-        identityPubKey,
+        unifiedPubKeys,
         ephemeralPubKey,
         plaintextPayload
       )
-    ) // @ts-ignore
+    )
+      // @ts-ignore
       .to.emit(logChain, "Handshake")
       .withArgs(
         recipientHash,
         recipient,
-        identityPubKey,
+        unifiedPubKeys,
         ephemeralPubKey,
         plaintextPayload
       );

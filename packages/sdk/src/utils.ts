@@ -37,8 +37,8 @@ export async function verifyEIP1271Signature(
 }
 
 /**
- * Checks if an address is a smart contract
- * Returns true if the address has deployed code
+ * Checks if an address is a smart contract that supports EIP-1271 signature verification
+ * Returns true if the address has deployed code AND implements isValidSignature function
  */
 export async function isSmartContract(
   address: string, 
@@ -46,12 +46,34 @@ export async function isSmartContract(
 ): Promise<boolean> {
   try {
     const code = await provider.getCode(address);
-    return code !== "0x";
+    
+    if (code === "0x") {
+      return false;
+    }
+    
+    try {
+      const contract = new Contract(
+        address,
+        ["function isValidSignature(bytes32, bytes) external view returns (bytes4)"],
+        provider
+      );
+      
+      await contract.isValidSignature.staticCall(
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "0x"
+      );
+      
+      return true;
+    } catch (err) {
+      // the contract doesn't support EIP-1271
+      return false;
+    }
   } catch (err) {
     console.error("Error checking if address is smart contract:", err);
     return false;
   }
 }
+
 
 /**
  * Verifies derivation proof and re-derives unified keys

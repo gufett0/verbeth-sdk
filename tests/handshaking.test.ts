@@ -387,20 +387,6 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       plaintextPayload: handshakeEvent.args.plaintextPayload,
     };
 
-    let decodedPayload = handshakeLog.plaintextPayload;
-    if (
-      typeof handshakeLog.plaintextPayload === "string" &&
-      handshakeLog.plaintextPayload.startsWith("0x")
-    ) {
-      try {
-        const bytes = new Uint8Array(
-          Buffer.from(handshakeLog.plaintextPayload.slice(2), "hex")
-        );
-        decodedPayload = new TextDecoder().decode(bytes);
-      } catch (err) {
-        // Keep original payload if decoding fails
-      }
-    }
 
     const isValidHandshake = await verifyHandshakeIdentity(
       handshakeLog,

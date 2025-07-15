@@ -14,7 +14,7 @@ import { hkdf } from "@noble/hashes/hkdf";
 import {
   verifyEOADerivationProof,
   verifySmartAccountDerivationProof,
-  isSmartContract
+  verifyEIP1271Signature,
 } from "../src/utils";
 import {
   verifyHandshakeIdentity,
@@ -75,7 +75,10 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
 
     it("verifyEOADerivationProof - KO with wrong keys", async () => {
       const wallet: HDNodeWallet = Wallet.createRandom();
-      const { derivationProof } = await deriveIdentityWithUnifiedKeys(wallet, wallet.address);
+      const { derivationProof } = await deriveIdentityWithUnifiedKeys(
+        wallet,
+        wallet.address
+      );
 
       const wrongKeys = {
         identityPubKey: new Uint8Array(32).fill(0xaa),
@@ -93,9 +96,36 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
   });
 
   describe("Smart Contract Verification", () => {
-    it("isSmartContract detects contracts correctly", async () => {
-      expect(await isSmartContract("0xCcCcCc...", mockProvider)).toBe(true);
-      expect(await isSmartContract("0xEeeEee...", mockProvider)).toBe(false);
+    it("verifyEIP1271Signature - handles both success and failure cases", async () => {
+      const contractAddress = "0xCcCcCc1234567890123456789012345678901234";
+      const messageHash = "0x" + "aa".repeat(32);
+      const signature = "0x" + "bb".repeat(65);
+
+      const failingProvider = {
+        async getCode() {
+          return "0x60016000";
+        },
+        async call() {
+          throw new Error("Contract call failed");
+        },
+      } as unknown as JsonRpcProvider;
+
+      const result = await verifyEIP1271Signature(
+        contractAddress,
+        messageHash,
+        signature,
+        failingProvider
+      );
+
+      const result2 = await verifyEIP1271Signature(
+        contractAddress,
+        messageHash,
+        signature,
+        mockProvider
+      );
+
+      expect(result).toBe(false);
+      expect(result2).toBe(true);
     });
 
     it("verifySmartAccountDerivationProof - handles EIP-1271 correctly", async () => {
@@ -175,7 +205,10 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
 
     it("verifyHandshakeIdentity - fails with invalid derivation proof", async () => {
       const wallet: HDNodeWallet = Wallet.createRandom();
-      const { unifiedPubKeys } = await deriveIdentityWithUnifiedKeys(wallet, wallet.address);
+      const { unifiedPubKeys } = await deriveIdentityWithUnifiedKeys(
+        wallet,
+        wallet.address
+      );
 
       // create invalid derivation proof with different wallet signature
       const differentWallet: HDNodeWallet = Wallet.createRandom();
@@ -212,7 +245,10 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
     it("verifyHandshakeResponseIdentity - EOA flow with unified keys", async () => {
       const responderWallet: HDNodeWallet = Wallet.createRandom();
       const { derivationProof, identityPubKey, unifiedPubKeys } =
-        await deriveIdentityWithUnifiedKeys(responderWallet, responderWallet.address);
+        await deriveIdentityWithUnifiedKeys(
+          responderWallet,
+          responderWallet.address
+        );
 
       const aliceEphemeral = nacl.box.keyPair(); // initiator
       const responderEphemeral = nacl.box.keyPair();
@@ -250,7 +286,10 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
     it("verifyHandshakeResponseIdentity - fails with wrong identity key", async () => {
       const responderWallet: HDNodeWallet = Wallet.createRandom();
       const { derivationProof, unifiedPubKeys } =
-        await deriveIdentityWithUnifiedKeys(responderWallet, responderWallet.address);
+        await deriveIdentityWithUnifiedKeys(
+          responderWallet,
+          responderWallet.address
+        );
 
       const aliceEphemeral = nacl.box.keyPair();
       const responderEphemeral = nacl.box.keyPair();

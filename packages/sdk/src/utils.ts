@@ -9,7 +9,7 @@ import {
 import { sha256 } from '@noble/hashes/sha256';
 import { hkdf } from '@noble/hashes/hkdf';
 import nacl from 'tweetnacl';
-import { DerivationProof } from './types';
+import { DerivationProof } from './types.js';
 
 /**
  * Generalized EIP-1271 signature verification

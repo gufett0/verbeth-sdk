@@ -2,8 +2,8 @@ import { sha256 } from '@noble/hashes/sha256';
 import { hkdf } from '@noble/hashes/hkdf';
 import { Signer } from 'ethers';
 import nacl from 'tweetnacl';
-import { encodeUnifiedPubKeys } from './payload';
-import { DerivationProof } from './types';
+import { encodeUnifiedPubKeys } from './payload.js';
+import { DerivationProof } from './types.js';
 
 interface IdentityKeyPair {
   // X25519 keys per encryption/decryption

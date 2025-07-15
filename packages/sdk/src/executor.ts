@@ -13,7 +13,7 @@ import {
   UserOpV06,
   UserOpV07,
   PackedUserOperation,
-} from "./types";
+} from "./types.js";
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
 
 function pack128x128(high: bigint, low: bigint): bigint {

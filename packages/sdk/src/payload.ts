@@ -1,5 +1,5 @@
 // packages/sdk/src/payload.ts
-import { DerivationProof } from './types'; 
+import { DerivationProof } from './types.js'; 
 
 
 export interface EncryptedPayload {

@@ -1,16 +1,16 @@
-export * from './crypto';
-export * from './payload';
-export * from './send';
-export * from './verify';
-export * from './types';
-export * from './deduplication';
-export * from './utils';
-export * from './identity';
-export * from './executor';
+export * from './crypto.js';
+export * from './payload.js';
+export * from './send.js';
+export * from './verify.js';
+export * from './types.js';
+export * from './deduplication.js';
+export * from './utils.js';
+export * from './identity.js';
+export * from './executor.js';
 
-export { decryptMessage as decryptLog } from './crypto';
+export { decryptMessage as decryptLog } from './crypto.js';
 
-export { getNextNonce } from './utils/nonce';
+export { getNextNonce } from './utils/nonce.js';
 
 export {
   encodeUnifiedPubKeys,
@@ -20,29 +20,29 @@ export {
   extractKeysFromHandshakePayload,
   extractKeysFromHandshakeResponse,
   parseHandshakeKeys
-} from './payload';
+} from './payload.js';
 
 export {
   decryptAndExtractHandshakeKeys,
   decryptMessage,
   decryptHandshakeResponse
-} from './crypto';
+} from './crypto.js';
 
 export {
   verifyDerivationProof,
   verifyEOADerivationProof,
   verifySmartAccountDerivationProof
-} from './utils';
+} from './utils.js';
 
 export {
   verifyAndExtractHandshakeKeys,
   verifyAndExtractHandshakeResponseKeys
-} from './verify';
+} from './verify.js';
 
 export {
   deriveIdentityKeyPairWithProof,
   deriveIdentityWithUnifiedKeys
-} from './identity';
+} from './identity.js';
 
 export {
   IExecutor,
@@ -50,4 +50,4 @@ export {
   UserOpExecutor,
   DirectEntryPointExecutor,  
   ExecutorFactory
-} from './executor';
+} from './executor.js';

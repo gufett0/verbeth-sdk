@@ -2,14 +2,14 @@
 import { 
   JsonRpcProvider
 } from "ethers";
-import { decryptAndExtractHandshakeKeys } from "./crypto";
-import { HandshakeLog, HandshakeResponseLog } from "./types";
-import { parseHandshakePayload, parseHandshakeKeys } from "./payload";
+import { decryptAndExtractHandshakeKeys } from "./crypto.js";
+import { HandshakeLog, HandshakeResponseLog } from "./types.js";
+import { parseHandshakePayload, parseHandshakeKeys } from "./payload.js";
 import { 
   verifyEOADerivationProof, 
   verifySmartAccountDerivationProof, 
   isSmartContract 
-} from "./utils";
+} from "./utils.js";
 
 // ============= Handshake Verification =============
 
@@ -93,7 +93,7 @@ export async function verifyHandshakeResponseIdentity(
     }
 
     const isContract = await isSmartContract(responseEvent.responder, provider);
-    
+
     const expectedKeys = {
       identityPubKey: extractedResponse.identityPubKey,
       signingPubKey: extractedResponse.signingPubKey

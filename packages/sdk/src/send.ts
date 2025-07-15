@@ -6,16 +6,16 @@ import {
   hexlify,
   Signer
 } from "ethers";
-import { getNextNonce } from './utils/nonce';
-import { encryptMessage, encryptStructuredPayload } from './crypto';
+import { getNextNonce } from './utils/nonce.js';
+import { encryptMessage, encryptStructuredPayload } from './crypto.js';
 import { 
   HandshakeContent, 
   serializeHandshakeContent,
   encodeUnifiedPubKeys,
   createHandshakeResponseContent
-} from './payload';
-import { IdentityKeyPair, DerivationProof } from './types';  
-import { IExecutor } from './executor';
+} from './payload.js';
+import { IdentityKeyPair, DerivationProof } from './types.js';  
+import { IExecutor } from './executor.js';
 import nacl from 'tweetnacl';
 
 /**

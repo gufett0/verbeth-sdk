@@ -7,7 +7,7 @@ import {
   decryptStructuredPayload,
   decryptHandshakeResponse,
   decryptAndExtractHandshakeKeys
-} from '../src/crypto';
+} from '../src/crypto.js';
 import { 
   HandshakePayload, 
   encodeHandshakePayload, 
@@ -20,9 +20,9 @@ import {
   extractKeysFromHandshakePayload,
   extractKeysFromHandshakeResponse,
   parseHandshakeKeys
-} from '../src/payload';
-import { DerivationProof } from '../src/types';
-import type { LogMessage } from '../src/types';
+} from '../src/payload.js';
+import { DerivationProof } from '../src/types.js';
+import type { LogMessage } from '../src/types.js';
 
 describe('Encryption/Decryption', () => {
   describe('Message Encryption', () => {

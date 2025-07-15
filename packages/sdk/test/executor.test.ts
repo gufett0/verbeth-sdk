@@ -9,9 +9,9 @@ import {
   sendEncryptedMessage,
   initiateHandshake,
   respondToHandshake
-} from "../src";
+} from "../src/index.js";
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
-import { IdentityKeyPair, DerivationProof } from "../src/types";
+import { IdentityKeyPair, DerivationProof } from "../src/types.js";
 
 const TEST_SMART_ACCOUNT_ADDRESS = "0x" + "12".repeat(20);
 const TEST_ENTRYPOINT_ADDRESS = "0x" + "45".repeat(20);

@@ -2,14 +2,14 @@ import { describe, it, expect, vi } from "vitest";
 import nacl from "tweetnacl";
 import { JsonRpcProvider } from "ethers";
 
-import { MessageDeduplicator, sendEncryptedMessage } from "../src";
-import { getNextNonce } from "../src/utils/nonce";
-import { convertPublicKeyToX25519 } from "../src/utils/x25519";
+import { MessageDeduplicator, sendEncryptedMessage } from "../src/index.js";
+import { getNextNonce } from "../src/utils/nonce.js";
+import { convertPublicKeyToX25519 } from "../src/utils/x25519.js";
 import { 
   isSmartContract, 
   verifyEIP1271Signature 
-} from "../src/utils";  
-import { ExecutorFactory } from "../src";
+} from "../src/utils.js";  
+import { ExecutorFactory } from "../src/index.js";
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
 
 const fakeProvider = {

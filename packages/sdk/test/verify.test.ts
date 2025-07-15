@@ -15,23 +15,23 @@ import {
   verifyEOADerivationProof,
   verifySmartAccountDerivationProof,
   verifyEIP1271Signature,
-} from "../src/utils";
+} from "../src/utils.js";
 import {
   verifyHandshakeIdentity,
   verifyHandshakeResponseIdentity,
-} from "../src/verify";
-import { encryptStructuredPayload } from "../src/crypto";
+} from "../src/verify.js";
+import { encryptStructuredPayload } from "../src/crypto.js";
 import {
   HandshakeResponseContent,
   encodeUnifiedPubKeys,
   parseHandshakeKeys,
-} from "../src/payload";
+} from "../src/payload.js";
 import {
   DerivationProof,
   HandshakeLog,
   HandshakeResponseLog,
-} from "../src/types";
-import { deriveIdentityWithUnifiedKeys } from "../src/identity";
+} from "../src/types.js";
+import { deriveIdentityWithUnifiedKeys } from "../src/identity.js";
 
 const mockProvider = {
   async getCode(address: string) {

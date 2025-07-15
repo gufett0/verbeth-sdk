@@ -9,8 +9,8 @@ import {
   MessagePayload,
   HandshakeResponseContent,
   extractKeysFromHandshakeResponse
-} from './payload';
-import { DerivationProof } from './types'; 
+} from './payload.js';
+import { DerivationProof } from './types.js'; 
 
 /**
  * Encrypts a structured payload (JSON-serializable objects)

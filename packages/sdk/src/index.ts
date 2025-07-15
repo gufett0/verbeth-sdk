@@ -23,7 +23,9 @@ export {
 } from './payload';
 
 export {
-  decryptAndExtractHandshakeKeys
+  decryptAndExtractHandshakeKeys,
+  decryptMessage,
+  decryptHandshakeResponse
 } from './crypto';
 
 export {

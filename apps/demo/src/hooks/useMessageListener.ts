@@ -7,6 +7,7 @@ import {
   parseHandshakePayload,
   verifyHandshakeIdentity,
   verifyHandshakeResponseIdentity,
+  IdentityKeyPair,
 } from "@verbeth/sdk";
 
 // Constants
@@ -69,7 +70,12 @@ interface UseMessageListenerProps {
   readProvider: any;
   address: string | undefined;
   contacts: Contact[];
+<<<<<<< Updated upstream
   identityKeyPair: { publicKey: Uint8Array; secretKey: Uint8Array } | null;
+=======
+  identityKeyPair: IdentityKeyPair | null; 
+  senderSignKeyPair: nacl.SignKeyPair;
+>>>>>>> Stashed changes
   onContactsUpdate: (contacts: Contact[]) => void;
   onLog: (message: string) => void;
 }

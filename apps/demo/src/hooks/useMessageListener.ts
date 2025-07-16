@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { AbiCoder, keccak256, toUtf8Bytes } from "ethers";
-import nacl from "tweetnacl";
 import {
   decryptMessage,
   decryptHandshakeResponse,
@@ -8,11 +7,13 @@ import {
   verifyHandshakeIdentity,
   verifyHandshakeResponseIdentity,
   IdentityKeyPair,
+  extractKeysFromHandshakeResponse,
+  decodeUnifiedPubKeys,
 } from "@verbeth/sdk";
 
 // Constants
-const LOGCHAIN_ADDR = "0xf9fe7E57459CC6c42791670FaD55c1F548AE51E8";
-const CONTRACT_CREATION_BLOCK = 30568313;
+const LOGCHAIN_SINGLETON_ADDR = "0xb0fD25AAa5f901D9A0931b19287776440FaBd031";
+const CONTRACT_CREATION_BLOCK = 32902584;
 const INITIAL_SCAN_BLOCKS = 10000; // Ultimi 10k blocchi per caricamento iniziale
 const MAX_RETRIES = 3;
 const MAX_RANGE_PROVIDER = 2000; // Range massimo per provider RPC
@@ -33,7 +34,8 @@ const EVENT_SIGNATURES = {
 
 interface Contact {
   address: string;
-  pubKey?: Uint8Array;
+  identityPubKey?: Uint8Array; // X25519 key for encryption
+  signingPubKey?: Uint8Array; // Ed25519 key for signing
   ephemeralKey?: Uint8Array;
   topic?: string;
   status: "none" | "handshake_sent" | "established";
@@ -46,6 +48,7 @@ interface PendingHandshake {
   sender: string;
   message: string;
   identityPubKey: Uint8Array;
+  signingPubKey: Uint8Array;
   ephemeralPubKey: Uint8Array;
   timestamp: number;
   verified: boolean;
@@ -70,12 +73,7 @@ interface UseMessageListenerProps {
   readProvider: any;
   address: string | undefined;
   contacts: Contact[];
-<<<<<<< Updated upstream
-  identityKeyPair: { publicKey: Uint8Array; secretKey: Uint8Array } | null;
-=======
-  identityKeyPair: IdentityKeyPair | null; 
-  senderSignKeyPair: nacl.SignKeyPair;
->>>>>>> Stashed changes
+  identityKeyPair: IdentityKeyPair | null;
   onContactsUpdate: (contacts: Contact[]) => void;
   onLog: (message: string) => void;
 }
@@ -267,7 +265,7 @@ export const useMessageListener = ({
     try {
       // 1. Handshakes to me
       const handshakeFilter = {
-        address: LOGCHAIN_ADDR,
+        address: LOGCHAIN_SINGLETON_ADDR,
         topics: [EVENT_SIGNATURES.Handshake, userRecipientHash],
       };
       const handshakeLogs = await safeGetLogs(
@@ -285,9 +283,13 @@ export const useMessageListener = ({
         .map((c) => c.topic)
         .filter(Boolean);
 
+        pendingTxHashes.forEach((hash, i) => {
+          onLog(`🔍 Pending[${i}]: ${hash}`);
+        });
+
       if (pendingTxHashes.length > 0) {
         const responseFilter = {
-          address: LOGCHAIN_ADDR,
+          address: LOGCHAIN_SINGLETON_ADDR,
           topics: [EVENT_SIGNATURES.HandshakeResponse],
         };
         const responseLogs = await safeGetLogs(
@@ -295,9 +297,16 @@ export const useMessageListener = ({
           fromBlock,
           toBlock
         );
+
+  onLog(`🔍 Found ${responseLogs.length} total handshake responses`);
+  responseLogs.forEach((log, i) => {
+    onLog(`🔍 Response[${i}] inResponseTo: ${log.topics[1]}`);
+  });
         const myResponses = responseLogs.filter((log) =>
           pendingTxHashes.includes(log.topics[1])
         );
+
+        onLog(`🔍 Filtered to ${myResponses.length} responses for me`);
         allEvents.push(
           ...myResponses.map((log) => ({
             ...log,
@@ -317,7 +326,7 @@ export const useMessageListener = ({
         );
 
         const messageFilter = {
-          address: LOGCHAIN_ADDR,
+          address: LOGCHAIN_SINGLETON_ADDR,
           topics: [EVENT_SIGNATURES.MessageSent, senderTopics],
         };
         const messageLogs = await safeGetLogs(
@@ -355,7 +364,7 @@ export const useMessageListener = ({
     }
   };
 
-  // Process handshake log 
+  // Process handshake log
   const processHandshakeLog = async (log: any) => {
     try {
       const abiCoder = new AbiCoder();
@@ -363,37 +372,60 @@ export const useMessageListener = ({
       const [identityPubKeyBytes, ephemeralPubKeyBytes, plaintextPayloadBytes] =
         decoded;
 
-      const identityPubKey = hexToUint8Array(identityPubKeyBytes);
+      const unifiedPubKeys = hexToUint8Array(identityPubKeyBytes);
+
+      const decodedKeys = decodeUnifiedPubKeys(unifiedPubKeys);
+      if (!decodedKeys) {
+        console.error("Failed to decode unified public keys");
+        return;
+      }
+      const identityPubKey = decodedKeys.identityPubKey; // X25519 per encryption
+      const signingPubKey = decodedKeys.signingPubKey; // Ed25519 per signing
+
       const ephemeralPubKey = hexToUint8Array(ephemeralPubKeyBytes);
       const plaintextPayload = new TextDecoder().decode(
         hexToUint8Array(plaintextPayloadBytes)
       );
 
-      const cleanSenderAddress = log.topics[2].replace(/^0x0+/, "0x");
+      const cleanSenderAddress = "0x" + log.topics[2].slice(-40);
       const recipientHash = log.topics[1];
 
-      // FIXED: Usa SDK function per parsare handshake payload
-      const handshakeContent = parseHandshakePayload(plaintextPayload);
+      let handshakeContent;
+      let hasValidDerivationProof = false;
 
+      try {
+        handshakeContent = parseHandshakePayload(plaintextPayload);
+        hasValidDerivationProof = true;
+      } catch (error) {
+        // Fallback to basic handshake content (no identity proof)
+        handshakeContent = {
+          plaintextPayload: plaintextPayload,
+          derivationProof: null,
+        };
+        hasValidDerivationProof = false;
+      }
+
+      // Crea handshakeEvent DOPO aver parsato il payload
       const handshakeEvent = {
         recipientHash,
         sender: cleanSenderAddress,
-        identityPubKey: identityPubKeyBytes,
+        pubKeys: identityPubKeyBytes,
         ephemeralPubKey: ephemeralPubKeyBytes,
-        plaintextPayload: handshakeContent.plaintextPayload,
+        plaintextPayload: plaintextPayload,
       };
 
+      // Verifica solo se hai derivationProof valido
       let isVerified = false;
-      try {
-        const tx = await readProvider.getTransaction(log.transactionHash);
-        if (tx?.serialized && identityKeyPair) {
+      if (hasValidDerivationProof) {
+        try {
           isVerified = await verifyHandshakeIdentity(
             handshakeEvent,
-            tx.serialized
+            readProvider
           );
+          onLog("Handshake's identity was correctly verified!");
+        } catch (error) {
+          console.warn("Failed to verify handshake identity:", error);
         }
-      } catch (error) {
-        console.warn("Failed to verify handshake identity:", error);
       }
 
       const pendingHandshake: PendingHandshake = {
@@ -401,6 +433,7 @@ export const useMessageListener = ({
         sender: cleanSenderAddress,
         message: handshakeContent.plaintextPayload,
         identityPubKey,
+        signingPubKey,
         ephemeralPubKey,
         timestamp: Date.now(),
         verified: isVerified,
@@ -422,8 +455,12 @@ export const useMessageListener = ({
     }
   };
 
-  // Process handshake response log - FIXED: usa chiavi corrette e SDK
+  // Process handshake response log
   const processHandshakeResponseLog = async (log: any) => {
+
+    onLog(`🔍 processHandshakeResponseLog called!`);
+    onLog(`🔍 inResponseTo: ${log.topics[1]}`);
+    onLog(`🔍 responder: ${"0x" + log.topics[2].slice(-40)}`);
     try {
       const abiCoder = new AbiCoder();
       const [ciphertextBytes] = abiCoder.decode(["bytes"], log.data);
@@ -431,7 +468,7 @@ export const useMessageListener = ({
         hexToUint8Array(ciphertextBytes)
       );
 
-      const responder = log.topics[2].replace(/^0x0+/, "0x");
+      const responder = "0x" + log.topics[2].slice(-40);
       const inResponseTo = log.topics[1];
 
       const contact = contacts.find(
@@ -450,7 +487,6 @@ export const useMessageListener = ({
         return;
       }
 
-      // FIXED: Usa SDK function per decryptare handshake response
       const decryptedResponse = decryptHandshakeResponse(
         ciphertextJson,
         contact.ephemeralKey
@@ -466,23 +502,26 @@ export const useMessageListener = ({
         return;
       }
 
+      const extractedKeys = extractKeysFromHandshakeResponse(decryptedResponse);
+      if (!extractedKeys) {
+        onLog(`❌ Failed to extract keys from handshake response`);
+        return;
+      }
+
       let isVerified = false;
       try {
-        const tx = await readProvider.getTransaction(log.transactionHash);
-        if (tx?.serialized) {
-          const responseEvent = {
-            inResponseTo,
-            responder,
-            ciphertext: ciphertextBytes,
-          };
+        const responseLog = {
+          inResponseTo,
+          responder,
+          ciphertext: ciphertextJson,
+        };
 
-          isVerified = await verifyHandshakeResponseIdentity(
-            tx.serialized,
-            responseEvent,
-            decryptedResponse.identityPubKey,
-            contact.ephemeralKey
-          );
-        }
+        isVerified = await verifyHandshakeResponseIdentity(
+          responseLog,
+          extractedKeys.identityPubKey,
+          contact.ephemeralKey,
+          readProvider
+        );
       } catch (error) {
         console.warn("Failed to verify handshake response identity:", error);
       }
@@ -492,7 +531,8 @@ export const useMessageListener = ({
           ? {
               ...c,
               status: "established" as const,
-              pubKey: decryptedResponse.identityPubKey,
+              identityPubKey: extractedKeys.identityPubKey,
+              signingPubKey: extractedKeys.signingPubKey,
               lastMessage: decryptedResponse.note,
               lastTimestamp: Date.now(),
             }
@@ -510,12 +550,12 @@ export const useMessageListener = ({
     }
   };
 
-  // Process message log - FIXED: usa chiavi derivate dal wallet
+  // Process message log
   const processMessageLog = async (log: any) => {
     try {
       const abiCoder = new AbiCoder();
       const [ciphertextBytes] = abiCoder.decode(["bytes"], log.data);
-      const sender = log.topics[1].replace(/^0x0+/, "0x");
+      const sender = "0x" + log.topics[1].slice(-40);
 
       const contact = contacts.find(
         (c) =>
@@ -523,29 +563,33 @@ export const useMessageListener = ({
           c.status === "established"
       );
 
-      if (!contact || !contact.pubKey) {
+      console.log("debub processMessageLog contact.identityPubKey ", contact.identityPubKey);
+
+      if (!contact || !contact.identityPubKey) {
         onLog(
           `❓ Received message from unknown contact: ${sender.slice(0, 8)}...`
         );
         return;
       }
 
-      // ✅ USA identityKeyPair invece di myIdentityKey
       if (!identityKeyPair) {
-          onLog(`⏳ Identity key not ready yet, skipping message from ${sender.slice(0, 8)}...`);
-          return;
-        }
+        onLog(
+          `⏳ Identity key not ready yet, skipping message from ${sender.slice(
+            0,
+            8
+          )}...`
+        );
+        return;
+      }
 
       const ciphertextJson = new TextDecoder().decode(
         hexToUint8Array(ciphertextBytes)
       );
 
-      // ✅ USA la chiave privata dell'identità per decifrare MessageSent
       const decryptedMessage = decryptMessage(
         ciphertextJson,
-        identityKeyPair.secretKey, 
-        contact.pubKey 
-        //undefined                     // ⭐ IGNORA firma per ora, fino a che non scambiamo signing keys
+        identityKeyPair.secretKey,
+        contact.signingPubKey
       );
 
       if (decryptedMessage) {
@@ -751,13 +795,13 @@ export const useMessageListener = ({
     if (
       readProvider &&
       address &&
-      identityKeyPair && 
+      identityKeyPair &&
       !isInitialLoading &&
       scanChunks.current.length === 0
     ) {
       performInitialScan();
     }
-  }, [readProvider, address, identityKeyPair, performInitialScan]); 
+  }, [readProvider, address, identityKeyPair, performInitialScan]);
 
   return {
     messages,

@@ -2,13 +2,17 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useWalletClient } from 'wagmi';
 import { useRpcProvider } from './rpc.js';
-import { Contract, BrowserProvider, keccak256, toUtf8Bytes, hexlify } from "ethers";
+import { Contract, BrowserProvider, keccak256, toUtf8Bytes } from "ethers";
+import {
+  LogChainV1__factory,
+  type LogChainV1,
+} from "@verbeth/contracts/typechain-types/index.js";
 import nacl from "tweetnacl";
 import {
   sendEncryptedMessage,
   initiateHandshake,
   respondToHandshake,
-  EOAExecutor,
+  IExecutor,
   ExecutorFactory,
   deriveIdentityKeyPairWithProof,
   IdentityKeyPair,
@@ -17,29 +21,14 @@ import {
 import { useMessageListener } from './hooks/useMessageListener.js';
 
 
-
-// Constants
-const LOGCHAIN_ABI = [
-  "event MessageSent(address indexed sender, bytes ciphertext, uint256 timestamp, bytes32 indexed topic, uint256 nonce)",
-  "event Handshake(bytes32 indexed recipientHash, address indexed sender, bytes identityPubKey, bytes ephemeralPubKey, bytes plaintextPayload)",
-  "event HandshakeResponse(bytes32 indexed inResponseTo, address indexed responder, bytes ciphertext)",
-  "function sendMessage(bytes calldata ciphertext, bytes32 topic, uint256 timestamp, uint256 nonce)",
-  "function initiateHandshake(bytes32 recipientHash, bytes identityPubKey, bytes ephemeralPubKey, bytes plaintextPayload)",
-  "function respondToHandshake(bytes32 inResponseTo, bytes ciphertext)"
-];
-
-const LOGCHAIN_ADDR = "0xf9fe7E57459CC6c42791670FaD55c1F548AE51E8";
-const CONTRACT_CREATION_BLOCK = 30568313;
+const LOGCHAIN_SINGLETON_ADDR = "0xb0fD25AAa5f901D9A0931b19287776440FaBd031";
+//const LOGCHAINPROXY_ADDR = "0x8e201F948de464ab0a08eAeA9692BbA3dB5D97C1";
+const CONTRACT_CREATION_BLOCK = 32902584;
 
 interface Contact {
   address: string;
-<<<<<<< Updated upstream
-  signingPubKey?: Uint8Array;
-  pubKey?: Uint8Array;
-=======
   identityPubKey?: Uint8Array;      // X25519 key for encryption
   signingPubKey?: Uint8Array;       // Ed25519 key for signing  
->>>>>>> Stashed changes
   ephemeralKey?: Uint8Array;
   topic?: string;
   status: 'none' | 'handshake_sent' | 'established';
@@ -56,22 +45,7 @@ export default function App() {
 
   // State
   const [ready, setReady] = useState(false);
-  const [contract, setContract] = useState<Contract | null>(null);
   const [recipientAddress, setRecipientAddress] = useState("");
-<<<<<<< Updated upstream
-  const [identityKeyPair, setIdentityKeyPair] = useState<{
-    publicKey: Uint8Array,
-    secretKey: Uint8Array,
-    signingPublicKey: Uint8Array,
-    signingSecretKey: Uint8Array
-  } | null>(null); const [message, setMessage] = useState("");
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
-  const [loading, setLoading] = useState(false);
-  // Refs
-  const logRef = useRef<HTMLTextAreaElement>(null);
-
-=======
   const [message, setMessage] = useState("");
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
@@ -79,16 +53,14 @@ export default function App() {
 
   const [identityKeyPair, setIdentityKeyPair] = useState<IdentityKeyPair | null>(null);
   const [derivationProof, setDerivationProof] = useState<DerivationProof | null>(null);
-  const [executor, setExecutor] = useState<EOAExecutor | null>(null);
+  const [executor, setExecutor] = useState<IExecutor | null>(null);
+  const [contract, setContract] = useState<LogChainV1 | null>(null);
+
 
   // Refs
   const logRef = useRef<HTMLTextAreaElement>(null);
 
-  // Demo keys - in production, derive from wallet
-  const senderSignKeyPair = useRef(nacl.sign.keyPair());
 
-
->>>>>>> Stashed changes
   useEffect(() => {
     setReady(readProvider !== null && isConnected && walletClient !== undefined);
   }, [readProvider, isConnected, walletClient]);
@@ -125,13 +97,6 @@ export default function App() {
           }
 
           addLog("🔑 Deriving identity key from wallet...");
-<<<<<<< Updated upstream
-          const keyPair = await deriveIdentityKeyPair(signer, address);
-          setIdentityKeyPair(keyPair);
-          addLog(`✅ Identity key derived:`);
-          addLog(`  📦 X25519: ${Buffer.from(keyPair.publicKey).toString('hex').slice(0, 16)}...`);
-          addLog(`  ✍️ Ed25519: ${Buffer.from(keyPair.signingPublicKey).toString('hex').slice(0, 16)}...`);
-=======
           const result = await deriveIdentityKeyPairWithProof(signer, address);
           setIdentityKeyPair(result.keyPair);
           setDerivationProof(result.derivationProof);
@@ -148,7 +113,6 @@ export default function App() {
           localStorage.setItem(cacheKey, JSON.stringify(toCache));
 
           addLog(`✅ Identity key derived and cached: ${Buffer.from(result.keyPair.publicKey).toString('hex').slice(0, 16)}...`);
->>>>>>> Stashed changes
         } catch (error) {
           console.error("Failed to derive identity key:", error);
           addLog(`❌ Failed to derive identity key: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -184,7 +148,7 @@ export default function App() {
     address,
     contacts,
     identityKeyPair: identityKeyPair,
-    onContactsUpdate: (newContacts) => setContacts(newContacts),
+    onContactsUpdate: (newContacts) => saveContacts(newContacts),
     onLog: addLog
   });
 
@@ -196,20 +160,15 @@ export default function App() {
       try {
         const ethersProvider = new BrowserProvider(walletClient.transport);
         const ethersSigner = await ethersProvider.getSigner();
-        const contractInstance = new Contract(LOGCHAIN_ADDR, LOGCHAIN_ABI, ethersSigner);
+        const contractInstance = LogChainV1__factory.connect(LOGCHAIN_SINGLETON_ADDR, ethersSigner as any);
 
         setContract(contractInstance);
         setSigner(ethersSigner);
 
-<<<<<<< Updated upstream
-        addLog("✅ Contract initialized and ready");
-=======
-        // Creare executor
         const executorInstance = ExecutorFactory.createEOA(contractInstance);
         setExecutor(executorInstance);
 
         addLog("✅ Contract and executor initialized and ready");
->>>>>>> Stashed changes
       } catch (error) {
         console.error("Failed to initialize contract:", error);
         addLog("❌ Failed to initialize contract");
@@ -307,53 +266,19 @@ export default function App() {
       const tx = await respondToHandshake({
         executor,
         inResponseTo: handshake.id,
-        initiatorPubKey: handshake.identityPubKey,
+        initiatorPubKey: handshake.ephemeralPubKey,
         responderIdentityKeyPair: identityKeyPair,
         note: responseMessage,
         derivationProof,
         signer
       });
 
-<<<<<<< Updated upstream
-      const responseContent: HandshakeResponseContent = {
-        identityPubKey: identityKeyPair.publicKey,
-        ephemeralPubKey: responderEphemeralKeyPair.publicKey,
-        note: responseMessage,
-      };
-
-      // Use SDK function for encrypting response
-      const encryptedResponse = encryptStructuredPayload(
-        responseContent,
-        handshake.ephemeralPubKey,
-        responderEphemeralKeyPair.secretKey,
-        responderEphemeralKeyPair.publicKey
-      );
-
-      const tx = await contract.respondToHandshake(
-        handshake.id,
-        toUtf8Bytes(encryptedResponse)
-      );
-
-        addLog(`🔍 Accepting handshake - signingKey: ${handshake.signingPubKey ? 'YES' : 'NO'}`);
-  if (handshake.signingPubKey) {
-    addLog(`🔍 Signing key: ${Buffer.from(handshake.signingPubKey).toString('hex').slice(0, 16)}...`);
-  }
-
-
-      // Add to contacts
-      const newContact: Contact = {
-        address: handshake.sender,
-        status: 'established',
-        pubKey: handshake.identityPubKey,
-=======
       // Salva le chiavi separate per il contact
       const newContact: Contact = {
         address: handshake.sender,
         status: 'established',
         identityPubKey: handshake.identityPubKey,  // X25519 per encryption
         signingPubKey: handshake.signingPubKey,    // Ed25519 per signing
->>>>>>> Stashed changes
-        signingPubKey: handshake.signingPubKey, 
         lastMessage: responseMessage,
         lastTimestamp: Date.now()
       };
@@ -372,11 +297,7 @@ export default function App() {
 
   // Send message to established contact
   const sendMessageToContact = async (contact: Contact, messageText: string) => {
-<<<<<<< Updated upstream
-    if (!contract || !address || !contact.pubKey || !identityKeyPair) {
-=======
     if (!executor || !address || !contact.identityPubKey) {
->>>>>>> Stashed changes
       addLog("❌ Contact not established or missing data");
       return;
     }
@@ -386,10 +307,15 @@ export default function App() {
       const topic = keccak256(toUtf8Bytes(`chat:${contact.address}`));
       const timestamp = Math.floor(Date.now() / 1000);
 
+      if (!identityKeyPair) {
+        addLog("❌ Identity key pair is missing");
+        setLoading(false);
+        return;
+      }
       const identityAsSigningKey = {
-      publicKey: identityKeyPair.signingPublicKey,  // ⭐ Ed25519 public key (64 bytes)
-      secretKey: identityKeyPair.signingSecretKey   // ⭐ Ed25519 secret key (64 bytes)
-    };
+        publicKey: identityKeyPair.signingPublicKey,  // ⭐ Ed25519 public key (64 bytes)
+        secretKey: identityKeyPair.signingSecretKey   // ⭐ Ed25519 secret key (64 bytes)
+      };
 
       await sendEncryptedMessage({
         executor,
@@ -719,7 +645,7 @@ export default function App() {
 
         {/* Debug Info */}
         <div className="mt-4 text-xs text-gray-500 space-y-1">
-          <p>Contract: {LOGCHAIN_ADDR}</p>
+          <p>Contract: {LOGCHAIN_SINGLETON_ADDR}</p>
           <p>Network: Base</p>
           <p>Contract creation block: {CONTRACT_CREATION_BLOCK}</p>
           <p>Status: {ready ? '🟢 Ready' : '🔴 Not Ready'} {(isInitialLoading || isLoadingMore) ? '⏳ Loading' : ''}</p>

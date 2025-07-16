@@ -45,6 +45,11 @@ export async function isSmartContract(
   provider: JsonRpcProvider
 ): Promise<boolean> {
   try {
+    // // skip ens resolution
+    // if (!address.startsWith('0x') || address.length !== 42) {
+    //   return false;
+    // }
+    
     const code = await provider.getCode(address);
     
     if (code === "0x") {

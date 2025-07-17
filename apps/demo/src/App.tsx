@@ -112,10 +112,10 @@ export default function App() {
 
       // Step 1: Initialize contract and signer FIRST
       addLog(`🔄 Initializing for account: ${address.slice(0, 8)}...`);
-      
+
       const ethersProvider = new BrowserProvider(walletClient.transport);
       const ethersSigner = await ethersProvider.getSigner();
-      
+
       // Verify signer matches the current address
       const signerAddress = await ethersSigner.getAddress();
       if (signerAddress.toLowerCase() !== address.toLowerCase()) {
@@ -134,25 +134,25 @@ export default function App() {
       // Step 2: Handle account change if needed
       if (address !== currentAccount) {
         addLog(`🔄 Account ${currentAccount ? 'changed' : 'connected'}: ${address.slice(0, 8)}...`);
-        
+
         // Clear current state
         setIdentityKeyPair(null);
         setDerivationProof(null);
         setSelectedContact(null);
-        
+
         // Switch account in database service
         await dbService.switchAccount(address);
-        
+
         // Update current account
         setCurrentAccount(address);
       }
 
       // Step 3: Initialize or load identity
       addLog(`🔑 Loading identity for ${address.slice(0, 8)}...`);
-      
+
       // Check database first
       const storedIdentity = await dbService.getIdentity(address);
-      
+
       if (storedIdentity) {
         setIdentityKeyPair(storedIdentity.keyPair);
         setDerivationProof(storedIdentity.proof ?? null);
@@ -161,7 +161,7 @@ export default function App() {
         // Derive new identity
         addLog("🔑 Deriving new identity key from wallet...");
         const result = await deriveIdentityKeyPairWithProof(ethersSigner, address);
-        
+
         setIdentityKeyPair(result.keyPair);
         setDerivationProof(result.derivationProof);
 
@@ -172,7 +172,7 @@ export default function App() {
           derivedAt: Date.now(),
           proof: result.derivationProof
         };
-        
+
         await dbService.saveIdentity(identityToStore);
 
         addLog(`✅ New identity key derived and saved: ${Buffer.from(result.keyPair.publicKey).toString('hex').slice(0, 16)}...`);
@@ -428,12 +428,21 @@ export default function App() {
                           >
                             Accept
                           </button>
+                          {/* === REJECT BUTTON === */}
+                          <button
+                            onClick={() => removePendingHandshake(handshake.id)}
+                            className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
+                            title="Reject handshake"
+                          >
+                            Reject
+                          </button>
                         </div>
                       </div>
                     ))}
                   </div>
                 </div>
               )}
+
             </div>
 
             {/* Middle Panel - Contacts */}
@@ -633,11 +642,6 @@ export default function App() {
           <p>Network: Base</p>
           <p>Contract creation block: {CONTRACT_CREATION_BLOCK}</p>
           <p>Status: {ready ? '🟢 Ready' : '🔴 Not Ready'} {(isInitialLoading || isLoadingMore) ? '⏳ Loading' : ''}</p>
-          {/* Debug info for development */}
-          <p>Current Account: {currentAccount?.slice(0, 8) || 'None'}...</p>
-          <p>Connected Address: {address?.slice(0, 8) || 'None'}...</p>
-          <p>Signer Available: {signer ? '✅' : '❌'}</p>
-          <p>Identity Available: {identityKeyPair ? '✅' : '❌'}</p>
         </div>
       </div>
     </div>

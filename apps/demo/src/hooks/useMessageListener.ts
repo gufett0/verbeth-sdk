@@ -212,13 +212,13 @@ export const useMessageListener = ({
         }
       }
 
-      // 2. ✅ FIXED: Load pending handshakes from fresh contacts
+      // 2. Load pending handshakes from fresh contacts
       const pendingTxHashes = contacts
         .filter((c) => c.status === "handshake_sent")
         .map((c) => c.topic)
         .filter(Boolean);
 
-      onLog(`🔍 Debug: Found ${pendingTxHashes.length} pending handshakes in blocks ${fromBlock}-${toBlock}`);
+      //onLog(`Debug: Found ${pendingTxHashes.length} pending handshakes in blocks ${fromBlock}-${toBlock}`);
       pendingTxHashes.forEach((hash, i) => {
         onLog(`🔍 Pending[${i}]: ${hash}`);
       });

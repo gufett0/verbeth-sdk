@@ -103,8 +103,6 @@ export class DbService {
 
   async getAllContacts(ownerAddress: string) {
     const normalizedOwner = this.normalizeAddress(ownerAddress);
-    console.log(`👥 Loading contacts for owner ${normalizedOwner.slice(0, 8)}...\nStack:\n${new Error().stack}`);
-
     
     const contacts = await this.db.contacts
       .where('ownerAddress')
@@ -112,7 +110,6 @@ export class DbService {
       .toArray();
     
     const sorted = contacts.sort((a, b) => (b.lastTimestamp ?? 0) - (a.lastTimestamp ?? 0));
-    console.log(`✅ Found ${sorted.length} contacts for owner ${normalizedOwner.slice(0, 8)}...`);
     return sorted;
   }
   

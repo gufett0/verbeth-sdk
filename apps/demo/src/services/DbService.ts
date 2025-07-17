@@ -103,7 +103,9 @@ export class DbService {
 
   async getAllContacts(ownerAddress: string) {
     const normalizedOwner = this.normalizeAddress(ownerAddress);
-    console.log(`👥 Loading contacts for owner ${normalizedOwner.slice(0, 8)}...`);
+    console.log(`👥 Loading contacts for owner ${normalizedOwner.slice(0, 8)}...\nStack:\n${new Error().stack}`);
+
+    
     const contacts = await this.db.contacts
       .where('ownerAddress')
       .equals(normalizedOwner)

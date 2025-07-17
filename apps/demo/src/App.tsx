@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useWalletClient } from 'wagmi';
 import { useRpcProvider } from './rpc.js';
@@ -47,8 +47,7 @@ export default function App() {
   const [contract, setContract] = useState<LogChainV1 | null>(null);
   const [signer, setSigner] = useState<any>(null);
 
-  // Refs for debouncing
-  const initTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Refs for logging - moved to top
   const logRef = useRef<HTMLTextAreaElement>(null);
 
   const addLog = useCallback((message: string) => {
@@ -59,7 +58,7 @@ export default function App() {
     }
   }, []);
 
-  // Message processor hook
+  // ✅ FIXED: Always call hooks in the same order - don't conditionally call them
   const {
     messages,
     pendingHandshakes,
@@ -75,7 +74,6 @@ export default function App() {
     onLog: addLog
   });
 
-  // Message listener hook
   const {
     isInitialLoading,
     isLoadingMore,
@@ -85,7 +83,6 @@ export default function App() {
   } = useMessageListener({
     readProvider,
     address,
-    contacts,
     onLog: addLog,
     onEventsProcessed: processEvents
   });
@@ -94,26 +91,12 @@ export default function App() {
     setReady(readProvider !== null && isConnected && walletClient !== undefined);
   }, [readProvider, isConnected, walletClient]);
 
-  // FIXED: Consolidated initialization with debouncing
+  // ✅ FIXED: Remove debouncing timeout to avoid hook order issues
   useEffect(() => {
-    // Clear any pending timeout
-    if (initTimeoutRef.current) {
-      clearTimeout(initTimeoutRef.current);
-    }
-
-    // Debounce initialization to prevent double execution
-    initTimeoutRef.current = setTimeout(async () => {
-      await handleInitialization();
-    }, 100);
-
-    return () => {
-      if (initTimeoutRef.current) {
-        clearTimeout(initTimeoutRef.current);
-      }
-    };
+    handleInitialization();
   }, [ready, readProvider, walletClient, address]);
 
-  const handleInitialization = async () => {
+  const handleInitialization = useCallback(async () => {
     try {
       // Reset everything if not ready
       if (!ready || !readProvider || !walletClient || !address) {
@@ -201,7 +184,7 @@ export default function App() {
       console.error("Failed to initialize:", error);
       addLog(`❌ Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  };
+  }, [ready, readProvider, walletClient, address, currentAccount, addLog]);
 
   // Send handshake
   const sendHandshake = async () => {

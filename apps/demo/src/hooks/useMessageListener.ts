@@ -22,7 +22,7 @@ import {
 interface UseMessageListenerProps {
   readProvider: any;
   address: string | undefined;
-  contacts: Contact[];
+  // ❌ Removed contacts prop - will load from DB directly
   onLog: (message: string) => void;
   onEventsProcessed: (events: ProcessedEvent[]) => void;
 }
@@ -30,7 +30,6 @@ interface UseMessageListenerProps {
 export const useMessageListener = ({
   readProvider,
   address,
-  contacts,
   onLog,
   onEventsProcessed
 }: UseMessageListenerProps): MessageListenerResult => {
@@ -52,7 +51,18 @@ export const useMessageListener = ({
     return keccak256(toUtf8Bytes(`contact:${recipientAddr.toLowerCase()}`));
   };
 
-  // RPC helper with retry logic
+  // ✅ NEW: Load contacts directly from database when needed
+  const getCurrentContacts = useCallback(async (): Promise<Contact[]> => {
+    if (!address) return [];
+    try {
+      return await dbService.getAllContacts(address);
+    } catch (error) {
+      onLog(`❌ Failed to load contacts: ${error}`);
+      return [];
+    }
+  }, [address, onLog]);
+
+  // RPC helper with retry logic (unchanged)
   const safeGetLogs = async (
     filter: any,
     fromBlock: number,
@@ -117,7 +127,7 @@ export const useMessageListener = ({
     return [];
   };
 
-  // Smart chunking: find optimal ranges with events
+  // Smart chunking (unchanged)
   const findEventRanges = async (
     fromBlock: number,
     toBlock: number
@@ -167,12 +177,15 @@ export const useMessageListener = ({
     return results;
   };
 
-  // Scan specific block range for all user events
+  // ✅ FIXED: Scan specific block range - load contacts from DB when needed
   const scanBlockRange = async (
     fromBlock: number,
     toBlock: number
   ): Promise<ProcessedEvent[]> => {
     if (!address) return [];
+
+    // ✅ Load fresh contacts from database
+    const contacts = await getCurrentContacts();
 
     const userRecipientHash = calculateRecipientHash(address);
     const allEvents: ProcessedEvent[] = [];
@@ -194,16 +207,21 @@ export const useMessageListener = ({
             eventType: "handshake",
             rawLog: log,
             blockNumber: log.blockNumber,
-            timestamp: Date.now() // Will be updated with block timestamp if needed
+            timestamp: Date.now()
           });
         }
       }
 
-      // 2. Handshake responses to my handshakes
+      // 2. ✅ FIXED: Load pending handshakes from fresh contacts
       const pendingTxHashes = contacts
         .filter((c) => c.status === "handshake_sent")
         .map((c) => c.topic)
         .filter(Boolean);
+
+      onLog(`🔍 Debug: Found ${pendingTxHashes.length} pending handshakes in blocks ${fromBlock}-${toBlock}`);
+      pendingTxHashes.forEach((hash, i) => {
+        onLog(`🔍 Pending[${i}]: ${hash}`);
+      });
 
       if (pendingTxHashes.length > 0) {
         const responseFilter = {
@@ -212,9 +230,16 @@ export const useMessageListener = ({
         };
         const responseLogs = await safeGetLogs(responseFilter, fromBlock, toBlock);
 
+        onLog(`🔍 Found ${responseLogs.length} total handshake responses in blocks ${fromBlock}-${toBlock}`);
+        responseLogs.forEach((log, i) => {
+          onLog(`🔍 Response[${i}] inResponseTo: ${log.topics[1]}`);
+        });
+
         const myResponses = responseLogs.filter((log) =>
           pendingTxHashes.includes(log.topics[1])
         );
+
+        onLog(`🔍 Filtered to ${myResponses.length} responses for me`);
 
         for (const log of myResponses) {
           const logKey = `${log.transactionHash}-${log.logIndex}`;
@@ -265,7 +290,7 @@ export const useMessageListener = ({
     return allEvents;
   };
 
-  // Initial backward scan
+  // Initial backward scan (unchanged)
   const performInitialScan = useCallback(async () => {
     if (!readProvider || !address || isInitialLoading) return;
 
@@ -327,9 +352,9 @@ export const useMessageListener = ({
     } finally {
       setIsInitialLoading(false);
     }
-  }, [readProvider, address, isInitialLoading, onLog, onEventsProcessed]);
+  }, [readProvider, address, isInitialLoading, onLog, onEventsProcessed, getCurrentContacts]);
 
-  // Lazy load more history
+  // Lazy load more history (unchanged)
   const loadMoreHistory = useCallback(async () => {
     if (
       !readProvider ||
@@ -409,7 +434,7 @@ export const useMessageListener = ({
     }
   }, [readProvider, address, isLoadingMore, canLoadMore, oldestScannedBlock, onLog, onEventsProcessed]);
 
-  // Real-time scanning for new blocks
+  // Real-time scanning for new blocks (unchanged)
   useEffect(() => {
     if (!readProvider || !address || !lastKnownBlock) return;
 
@@ -440,7 +465,7 @@ export const useMessageListener = ({
     return () => clearInterval(interval);
   }, [readProvider, address, lastKnownBlock, onLog, onEventsProcessed]);
 
-    // Clear state when address changes
+  // Clear state when address changes
   useEffect(() => {
     if (address) {
       setIsInitialLoading(false);

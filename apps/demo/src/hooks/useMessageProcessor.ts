@@ -1,6 +1,6 @@
 // apps/demo/src/hooks/useMessageProcessor.ts
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { AbiCoder } from "ethers";
 import {
   decryptMessage,
@@ -42,14 +42,6 @@ export const useMessageProcessor = ({
   const [messages, setMessages] = useState<Message[]>([]);
   const [pendingHandshakes, setPendingHandshakes] = useState<PendingHandshake[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
-
-  // Ref per avere sempre la versione più aggiornata di contacts
-  const contactsRef = useRef<Contact[]>([]);
-  
-  // Aggiorna il ref ogni volta che contacts cambia
-  useEffect(() => {
-    contactsRef.current = contacts;
-  }, [contacts]);
 
   // Helper functions
   const hexToUint8Array = (hex: string): Uint8Array => {
@@ -179,10 +171,9 @@ export const useMessageProcessor = ({
     }
   }, [address, readProvider, onLog]);
 
-  // Process handshake response log
+  // ✅ FIXED: Process handshake response log - load contacts from DB
   const processHandshakeResponseLog = useCallback(async (
-    event: ProcessedEvent, 
-    currentContacts: Contact[] // ← Ora passiamo contacts come parametro
+    event: ProcessedEvent
   ): Promise<void> => {
     if (!address || !readProvider) return;
 
@@ -195,6 +186,10 @@ export const useMessageProcessor = ({
       const responder = "0x" + log.topics[2].slice(-40);
       const inResponseTo = log.topics[1];
 
+      // ✅ FIXED: Load fresh contacts from database instead of using stale parameter
+      const currentContacts = await dbService.getAllContacts(address);
+      onLog(`🔍 Debug: Loaded ${currentContacts.length} contacts from DB for handshake response`);
+      
       // Find the contact this response is for
       const contact = currentContacts.find(
         c => c.address.toLowerCase() === responder.toLowerCase() && c.status === "handshake_sent"
@@ -202,6 +197,7 @@ export const useMessageProcessor = ({
 
       if (!contact || !contact.ephemeralKey) {
         onLog(`❓ Received handshake response from unknown contact: ${responder.slice(0, 8)}...`);
+        onLog(`🔍 Debug: Available contacts: ${currentContacts.map(c => `${c.address.slice(0,8)}(${c.status})`).join(', ')}`);
         return;
       }
 
@@ -267,10 +263,9 @@ export const useMessageProcessor = ({
     }
   }, [address, readProvider, onLog]);
 
-  // Process message log
+  // ✅ FIXED: Process message log - load contacts from DB
   const processMessageLog = useCallback(async (
-    event: ProcessedEvent, 
-    currentContacts: Contact[] // ← Ora passiamo contacts come parametro
+    event: ProcessedEvent
   ): Promise<void> => {
     if (!address || !identityKeyPair) return;
 
@@ -281,6 +276,10 @@ export const useMessageProcessor = ({
       const [ciphertextBytes, timestamp, topic, nonce] = decoded;
 
       const sender = "0x" + log.topics[1].slice(-40);
+      
+      // ✅ FIXED: Load fresh contacts from database instead of using stale parameter
+      const currentContacts = await dbService.getAllContacts(address);
+      
       const contact = currentContacts.find(
         c => c.address.toLowerCase() === sender.toLowerCase() && c.status === "established"
       );
@@ -339,26 +338,23 @@ export const useMessageProcessor = ({
     }
   }, [address, identityKeyPair, onLog]);
 
-  // Main event processing function - ORA STABILE!
+  // ✅ FIXED: Main event processing function - NOW STABLE!
   const processEvents = useCallback(async (events: ProcessedEvent[]) => {
-    // Usa la versione più aggiornata di contacts dal ref
-    const currentContacts = contactsRef.current;
-    
     for (const event of events) {
       switch (event.eventType) {
         case "handshake":
           await processHandshakeLog(event);
           break;
         case "handshake_response":
-          await processHandshakeResponseLog(event, currentContacts); // ← Passa contacts
+          await processHandshakeResponseLog(event); // ✅ Removed currentContacts parameter
           break;
         case "message":
-          await processMessageLog(event, currentContacts); // ← Passa contacts
+          await processMessageLog(event); // ✅ Removed currentContacts parameter
           break;
       }
     }
   }, [processHandshakeLog, processHandshakeResponseLog, processMessageLog]);
-  //   ↑ Ora dipende solo dalle funzioni, non da `contacts`!
+  // ✅ Now it only depends on the processing functions, not on contacts state!
 
   // Helper functions for UI
   const addMessage = useCallback(async (message: Message) => {
@@ -377,15 +373,14 @@ export const useMessageProcessor = ({
   }, []);
 
   const updateContact = useCallback(async (contact: Contact) => {
-    if (!address) return;
-    
-    const contactWithOwner = { ...contact, ownerAddress: address };
-    await dbService.saveContact(contactWithOwner);
-    setContacts(prev => 
-      prev.map(c => c.address.toLowerCase() === contact.address.toLowerCase() ? contactWithOwner : c)
-    );
-  }, [address]);
+  if (!address) return;
+  const contactWithOwner = { ...contact, ownerAddress: address };
+  await dbService.saveContact(contactWithOwner);
 
+  // Always reload all contacts from the DB after update to ensure state is correct
+  const allContacts = await dbService.getAllContacts(address);
+  setContacts(allContacts);
+}, [address]);
 
   // Clear state when address changes
   useEffect(() => {

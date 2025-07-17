@@ -1,120 +1,55 @@
+// apps/demo/src/hooks/useMessageListener.ts
+
 import { useState, useEffect, useRef, useCallback } from "react";
-import { AbiCoder, keccak256, toUtf8Bytes } from "ethers";
+import { keccak256, toUtf8Bytes } from "ethers";
+import { dbService } from "../services/DbService.js";
 import {
-  decryptMessage,
-  decryptHandshakeResponse,
-  parseHandshakePayload,
-  verifyHandshakeIdentity,
-  verifyHandshakeResponseIdentity,
-  IdentityKeyPair,
-  extractKeysFromHandshakeResponse,
-  decodeUnifiedPubKeys,
-} from "@verbeth/sdk";
-
-// Constants
-const LOGCHAIN_SINGLETON_ADDR = "0xb0fD25AAa5f901D9A0931b19287776440FaBd031";
-const CONTRACT_CREATION_BLOCK = 32902584;
-const INITIAL_SCAN_BLOCKS = 10000; // Ultimi 10k blocchi per caricamento iniziale
-const MAX_RETRIES = 3;
-const MAX_RANGE_PROVIDER = 2000; // Range massimo per provider RPC
-const CHUNK_SIZE = 2000; // Dimensione chunk per smart chunking ( se == a MAX_RANGE_PROVIDER allora 1 chunk == 1 chiamata RPC)
-const REAL_TIME_BUFFER = 3; // Buffer
-
-const EVENT_SIGNATURES = {
-  MessageSent: keccak256(
-    toUtf8Bytes("MessageSent(address,bytes,uint256,bytes32,uint256)")
-  ),
-  Handshake: keccak256(
-    toUtf8Bytes("Handshake(bytes32,address,bytes,bytes,bytes)")
-  ),
-  HandshakeResponse: keccak256(
-    toUtf8Bytes("HandshakeResponse(bytes32,address,bytes)")
-  ),
-};
-
-interface Contact {
-  address: string;
-  identityPubKey?: Uint8Array; // X25519 key for encryption
-  signingPubKey?: Uint8Array; // Ed25519 key for signing
-  ephemeralKey?: Uint8Array;
-  topic?: string;
-  status: "none" | "handshake_sent" | "established";
-  lastMessage?: string;
-  lastTimestamp?: number;
-}
-
-interface PendingHandshake {
-  id: string;
-  sender: string;
-  message: string;
-  identityPubKey: Uint8Array;
-  signingPubKey: Uint8Array;
-  ephemeralPubKey: Uint8Array;
-  timestamp: number;
-  verified: boolean;
-}
-
-interface Message {
-  id: string;
-  content: string;
-  sender: string;
-  timestamp: number;
-  type: "incoming" | "outgoing" | "system";
-}
-
-interface ScanChunk {
-  fromBlock: number;
-  toBlock: number;
-  loaded: boolean;
-  events: any[];
-}
+  LOGCHAIN_SINGLETON_ADDR,
+  CONTRACT_CREATION_BLOCK,
+  INITIAL_SCAN_BLOCKS,
+  MAX_RETRIES,
+  MAX_RANGE_PROVIDER,
+  CHUNK_SIZE,
+  REAL_TIME_BUFFER,
+  EVENT_SIGNATURES,
+  Contact,
+  ScanProgress,
+  ScanChunk,
+  ProcessedEvent,
+  MessageListenerResult
+} from "../types.js";
 
 interface UseMessageListenerProps {
   readProvider: any;
   address: string | undefined;
   contacts: Contact[];
-  identityKeyPair: IdentityKeyPair | null;
-  onContactsUpdate: (contacts: Contact[]) => void;
   onLog: (message: string) => void;
+  onEventsProcessed: (events: ProcessedEvent[]) => void;
 }
 
 export const useMessageListener = ({
   readProvider,
   address,
   contacts,
-  identityKeyPair,
-  onContactsUpdate,
   onLog,
-}: UseMessageListenerProps) => {
+  onEventsProcessed
+}: UseMessageListenerProps): MessageListenerResult => {
+  
   // State
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [pendingHandshakes, setPendingHandshakes] = useState<
-    PendingHandshake[]
-  >([]);
   const [isInitialLoading, setIsInitialLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [canLoadMore, setCanLoadMore] = useState(true);
-  const [syncProgress, setSyncProgress] = useState<{
-    current: number;
-    total: number;
-  } | null>(null);
+  const [syncProgress, setSyncProgress] = useState<ScanProgress | null>(null);
+  const [lastKnownBlock, setLastKnownBlock] = useState<number | null>(null);
+  const [oldestScannedBlock, setOldestScannedBlock] = useState<number | null>(null);
 
   // Refs
   const processedLogs = useRef(new Set<string>());
   const scanChunks = useRef<ScanChunk[]>([]);
-  const lastKnownBlock = useRef<number | null>(null);
-  const oldestScannedBlock = useRef<number | null>(null);
 
   // Helper functions
   const calculateRecipientHash = (recipientAddr: string) => {
     return keccak256(toUtf8Bytes(`contact:${recipientAddr.toLowerCase()}`));
-  };
-
-  const hexToUint8Array = (hex: string): Uint8Array => {
-    const cleanHex = hex.replace("0x", "");
-    return new Uint8Array(
-      cleanHex.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || []
-    );
   };
 
   // RPC helper with retry logic
@@ -125,27 +60,19 @@ export const useMessageListener = ({
     retries = MAX_RETRIES
   ): Promise<any[]> => {
     let attempt = 0;
-    let delay = 1000; // FIX: Delay iniziale più lungo
+    let delay = 1000;
 
     while (attempt < retries) {
       try {
-        // FIX: Valida che il range non sia troppo piccolo o invalido
         if (fromBlock > toBlock) {
           onLog(`⚠️ Invalid block range: ${fromBlock} > ${toBlock}`);
           return [];
         }
 
-        // FIX: Limita range massimo per evitare errori provider
         if (toBlock - fromBlock > MAX_RANGE_PROVIDER) {
-          //onLog(`⚠️ Range too large (${toBlock - fromBlock}), splitting...`);
           const mid = fromBlock + Math.floor((toBlock - fromBlock) / 2);
           const firstHalf = await safeGetLogs(filter, fromBlock, mid, retries);
-          const secondHalf = await safeGetLogs(
-            filter,
-            mid + 1,
-            toBlock,
-            retries
-          );
+          const secondHalf = await safeGetLogs(filter, mid + 1, toBlock, retries);
           return [...firstHalf, ...secondHalf];
         }
 
@@ -167,9 +94,8 @@ export const useMessageListener = ({
             onLog(
               `⏳ RPC error, retrying in ${delay}ms... (attempt ${attempt}/${retries})`
             );
-            onLog(`Error details: ${error.message}`);
             await new Promise((resolve) => setTimeout(resolve, delay));
-            delay *= 1.5; // FIX: Incremento più graduale
+            delay *= 1.5;
             continue;
           }
         }
@@ -179,19 +105,15 @@ export const useMessageListener = ({
           error.message?.includes("range")
         ) {
           onLog(`❌ Block range error, skipping range ${fromBlock}-${toBlock}`);
-          return []; // FIX: Return empty instead of throwing
+          return [];
         }
 
-        onLog(
-          `❌ RPC error on range ${fromBlock}-${toBlock}: ${error.message}`
-        );
-        return []; // FIX: Return empty instead of throwing
+        onLog(`❌ RPC error on range ${fromBlock}-${toBlock}: ${error.message}`);
+        return [];
       }
     }
 
-    onLog(
-      `❌ Failed after ${retries} retries for range ${fromBlock}-${toBlock}`
-    );
+    onLog(`❌ Failed after ${retries} retries for range ${fromBlock}-${toBlock}`);
     return [];
   };
 
@@ -201,34 +123,29 @@ export const useMessageListener = ({
     toBlock: number
   ): Promise<[number, number][]> => {
     const ranges: [number, number][] = [];
-
     let currentBlock = toBlock;
 
     while (currentBlock >= fromBlock) {
       const rangeStart = Math.max(currentBlock - CHUNK_SIZE, fromBlock);
       const rangeEnd = currentBlock;
 
-      ranges.unshift([rangeStart, rangeEnd]); // Add to beginning for chronological order
+      ranges.unshift([rangeStart, rangeEnd]);
       currentBlock = rangeStart - 1;
 
-      // Limit to reasonable number of ranges to avoid overwhelming the RPC
       if (ranges.length >= 5) break;
     }
 
     return ranges;
   };
 
-  const batchScanRanges = async (
-    ranges: [number, number][]
-  ): Promise<any[]> => {
+  const batchScanRanges = async (ranges: [number, number][]): Promise<ProcessedEvent[]> => {
     if (ranges.length > 1) {
       setSyncProgress({ current: 0, total: ranges.length });
     }
 
-    let results: any[] = [];
+    let results: ProcessedEvent[] = [];
     let completedRanges = 0;
 
-    // FIX: Riduci concorrenza e aggiungi delay per evitare rate limiting
     for (const range of ranges) {
       const [start, end] = range;
       try {
@@ -238,13 +155,11 @@ export const useMessageListener = ({
 
         setSyncProgress({ current: completedRanges, total: ranges.length });
 
-        // FIX: Aggiungi delay tra le richieste per provider pubblico
         if (completedRanges < ranges.length) {
           await new Promise((resolve) => setTimeout(resolve, 200));
         }
       } catch (error) {
         onLog(`❌ Failed to scan range ${start}-${end}: ${error}`);
-        // FIX: Continue instead of breaking on single range failure
       }
     }
 
@@ -256,11 +171,11 @@ export const useMessageListener = ({
   const scanBlockRange = async (
     fromBlock: number,
     toBlock: number
-  ): Promise<any[]> => {
+  ): Promise<ProcessedEvent[]> => {
     if (!address) return [];
 
     const userRecipientHash = calculateRecipientHash(address);
-    const allEvents: any[] = [];
+    const allEvents: ProcessedEvent[] = [];
 
     try {
       // 1. Handshakes to me
@@ -268,14 +183,21 @@ export const useMessageListener = ({
         address: LOGCHAIN_SINGLETON_ADDR,
         topics: [EVENT_SIGNATURES.Handshake, userRecipientHash],
       };
-      const handshakeLogs = await safeGetLogs(
-        handshakeFilter,
-        fromBlock,
-        toBlock
-      );
-      allEvents.push(
-        ...handshakeLogs.map((log) => ({ ...log, eventType: "handshake" }))
-      );
+      const handshakeLogs = await safeGetLogs(handshakeFilter, fromBlock, toBlock);
+      
+      for (const log of handshakeLogs) {
+        const logKey = `${log.transactionHash}-${log.logIndex}`;
+        if (!processedLogs.current.has(logKey)) {
+          processedLogs.current.add(logKey);
+          allEvents.push({
+            logKey,
+            eventType: "handshake",
+            rawLog: log,
+            blockNumber: log.blockNumber,
+            timestamp: Date.now() // Will be updated with block timestamp if needed
+          });
+        }
+      }
 
       // 2. Handshake responses to my handshakes
       const pendingTxHashes = contacts
@@ -283,60 +205,58 @@ export const useMessageListener = ({
         .map((c) => c.topic)
         .filter(Boolean);
 
-        pendingTxHashes.forEach((hash, i) => {
-          onLog(`🔍 Pending[${i}]: ${hash}`);
-        });
-
       if (pendingTxHashes.length > 0) {
         const responseFilter = {
           address: LOGCHAIN_SINGLETON_ADDR,
           topics: [EVENT_SIGNATURES.HandshakeResponse],
         };
-        const responseLogs = await safeGetLogs(
-          responseFilter,
-          fromBlock,
-          toBlock
-        );
+        const responseLogs = await safeGetLogs(responseFilter, fromBlock, toBlock);
 
-  onLog(`🔍 Found ${responseLogs.length} total handshake responses`);
-  responseLogs.forEach((log, i) => {
-    onLog(`🔍 Response[${i}] inResponseTo: ${log.topics[1]}`);
-  });
         const myResponses = responseLogs.filter((log) =>
           pendingTxHashes.includes(log.topics[1])
         );
 
-        onLog(`🔍 Filtered to ${myResponses.length} responses for me`);
-        allEvents.push(
-          ...myResponses.map((log) => ({
-            ...log,
-            eventType: "handshake_response",
-          }))
-        );
+        for (const log of myResponses) {
+          const logKey = `${log.transactionHash}-${log.logIndex}`;
+          if (!processedLogs.current.has(logKey)) {
+            processedLogs.current.add(logKey);
+            allEvents.push({
+              logKey,
+              eventType: "handshake_response",
+              rawLog: log,
+              blockNumber: log.blockNumber,
+              timestamp: Date.now()
+            });
+          }
+        }
       }
 
       // 3. Messages from established contacts
-      const establishedContacts = contacts.filter(
-        (c) => c.status === "established"
-      );
+      const establishedContacts = contacts.filter((c) => c.status === "established");
       if (establishedContacts.length > 0) {
         const senderTopics = establishedContacts.map(
-          (c) =>
-            "0x" + c.address.replace("0x", "").toLowerCase().padStart(64, "0")
+          (c) => "0x" + c.address.replace("0x", "").toLowerCase().padStart(64, "0")
         );
 
         const messageFilter = {
           address: LOGCHAIN_SINGLETON_ADDR,
           topics: [EVENT_SIGNATURES.MessageSent, senderTopics],
         };
-        const messageLogs = await safeGetLogs(
-          messageFilter,
-          fromBlock,
-          toBlock
-        );
-        allEvents.push(
-          ...messageLogs.map((log) => ({ ...log, eventType: "message" }))
-        );
+        const messageLogs = await safeGetLogs(messageFilter, fromBlock, toBlock);
+        
+        for (const log of messageLogs) {
+          const logKey = `${log.transactionHash}-${log.logIndex}`;
+          if (!processedLogs.current.has(logKey)) {
+            processedLogs.current.add(logKey);
+            allEvents.push({
+              logKey,
+              eventType: "message",
+              rawLog: log,
+              blockNumber: log.blockNumber,
+              timestamp: Date.now()
+            });
+          }
+        }
       }
     } catch (error) {
       onLog(`⚠️ Error scanning block range ${fromBlock}-${toBlock}: ${error}`);
@@ -345,282 +265,25 @@ export const useMessageListener = ({
     return allEvents;
   };
 
-  // Process events based on type
-  const processEvent = async (event: any) => {
-    const logKey = `${event.transactionHash}-${event.logIndex}`;
-    if (processedLogs.current.has(logKey)) return;
-    processedLogs.current.add(logKey);
-
-    switch (event.eventType) {
-      case "handshake":
-        await processHandshakeLog(event);
-        break;
-      case "handshake_response":
-        await processHandshakeResponseLog(event);
-        break;
-      case "message":
-        await processMessageLog(event);
-        break;
-    }
-  };
-
-  // Process handshake log
-  const processHandshakeLog = async (log: any) => {
-    try {
-      const abiCoder = new AbiCoder();
-      const decoded = abiCoder.decode(["bytes", "bytes", "bytes"], log.data);
-      const [identityPubKeyBytes, ephemeralPubKeyBytes, plaintextPayloadBytes] =
-        decoded;
-
-      const unifiedPubKeys = hexToUint8Array(identityPubKeyBytes);
-
-      const decodedKeys = decodeUnifiedPubKeys(unifiedPubKeys);
-      if (!decodedKeys) {
-        console.error("Failed to decode unified public keys");
-        return;
-      }
-      const identityPubKey = decodedKeys.identityPubKey; // X25519 per encryption
-      const signingPubKey = decodedKeys.signingPubKey; // Ed25519 per signing
-
-      const ephemeralPubKey = hexToUint8Array(ephemeralPubKeyBytes);
-      const plaintextPayload = new TextDecoder().decode(
-        hexToUint8Array(plaintextPayloadBytes)
-      );
-
-      const cleanSenderAddress = "0x" + log.topics[2].slice(-40);
-      const recipientHash = log.topics[1];
-
-      let handshakeContent;
-      let hasValidDerivationProof = false;
-
-      try {
-        handshakeContent = parseHandshakePayload(plaintextPayload);
-        hasValidDerivationProof = true;
-      } catch (error) {
-        // Fallback to basic handshake content (no identity proof)
-        handshakeContent = {
-          plaintextPayload: plaintextPayload,
-          derivationProof: null,
-        };
-        hasValidDerivationProof = false;
-      }
-
-      // Crea handshakeEvent DOPO aver parsato il payload
-      const handshakeEvent = {
-        recipientHash,
-        sender: cleanSenderAddress,
-        pubKeys: identityPubKeyBytes,
-        ephemeralPubKey: ephemeralPubKeyBytes,
-        plaintextPayload: plaintextPayload,
-      };
-
-      // Verifica solo se hai derivationProof valido
-      let isVerified = false;
-      if (hasValidDerivationProof) {
-        try {
-          isVerified = await verifyHandshakeIdentity(
-            handshakeEvent,
-            readProvider
-          );
-          onLog("Handshake's identity was correctly verified!");
-        } catch (error) {
-          console.warn("Failed to verify handshake identity:", error);
-        }
-      }
-
-      const pendingHandshake: PendingHandshake = {
-        id: log.transactionHash,
-        sender: cleanSenderAddress,
-        message: handshakeContent.plaintextPayload,
-        identityPubKey,
-        signingPubKey,
-        ephemeralPubKey,
-        timestamp: Date.now(),
-        verified: isVerified,
-      };
-
-      setPendingHandshakes((prev) => {
-        const existing = prev.find((h) => h.id === pendingHandshake.id);
-        if (existing) return prev;
-        return [...prev, pendingHandshake];
-      });
-
-      onLog(
-        `📨 Handshake received from ${cleanSenderAddress.slice(0, 8)}... ${
-          isVerified ? "✅" : "⚠️"
-        }: "${handshakeContent.plaintextPayload}"`
-      );
-    } catch (error) {
-      console.error("Failed to process handshake log:", error);
-    }
-  };
-
-  // Process handshake response log
-  const processHandshakeResponseLog = async (log: any) => {
-
-    onLog(`🔍 processHandshakeResponseLog called!`);
-    onLog(`🔍 inResponseTo: ${log.topics[1]}`);
-    onLog(`🔍 responder: ${"0x" + log.topics[2].slice(-40)}`);
-    try {
-      const abiCoder = new AbiCoder();
-      const [ciphertextBytes] = abiCoder.decode(["bytes"], log.data);
-      const ciphertextJson = new TextDecoder().decode(
-        hexToUint8Array(ciphertextBytes)
-      );
-
-      const responder = "0x" + log.topics[2].slice(-40);
-      const inResponseTo = log.topics[1];
-
-      const contact = contacts.find(
-        (c) =>
-          c.address.toLowerCase() === responder.toLowerCase() &&
-          c.status === "handshake_sent"
-      );
-
-      if (!contact || !contact.ephemeralKey) {
-        onLog(
-          `❓ Received handshake response from unknown contact: ${responder.slice(
-            0,
-            8
-          )}...`
-        );
-        return;
-      }
-
-      const decryptedResponse = decryptHandshakeResponse(
-        ciphertextJson,
-        contact.ephemeralKey
-      );
-
-      if (!decryptedResponse) {
-        onLog(
-          `❌ Failed to decrypt handshake response from ${responder.slice(
-            0,
-            8
-          )}...`
-        );
-        return;
-      }
-
-      const extractedKeys = extractKeysFromHandshakeResponse(decryptedResponse);
-      if (!extractedKeys) {
-        onLog(`❌ Failed to extract keys from handshake response`);
-        return;
-      }
-
-      let isVerified = false;
-      try {
-        const responseLog = {
-          inResponseTo,
-          responder,
-          ciphertext: ciphertextJson,
-        };
-
-        isVerified = await verifyHandshakeResponseIdentity(
-          responseLog,
-          extractedKeys.identityPubKey,
-          contact.ephemeralKey,
-          readProvider
-        );
-      } catch (error) {
-        console.warn("Failed to verify handshake response identity:", error);
-      }
-
-      const updatedContacts = contacts.map((c) =>
-        c.address.toLowerCase() === responder.toLowerCase()
-          ? {
-              ...c,
-              status: "established" as const,
-              identityPubKey: extractedKeys.identityPubKey,
-              signingPubKey: extractedKeys.signingPubKey,
-              lastMessage: decryptedResponse.note,
-              lastTimestamp: Date.now(),
-            }
-          : c
-      );
-      onContactsUpdate(updatedContacts);
-
-      onLog(
-        `🤝 Handshake completed with ${responder.slice(0, 8)}... ${
-          isVerified ? "✅" : "⚠️"
-        }: "${decryptedResponse.note}"`
-      );
-    } catch (error) {
-      console.error("Failed to process handshake response log:", error);
-    }
-  };
-
-  // Process message log
-  const processMessageLog = async (log: any) => {
-    try {
-      const abiCoder = new AbiCoder();
-      const [ciphertextBytes] = abiCoder.decode(["bytes"], log.data);
-      const sender = "0x" + log.topics[1].slice(-40);
-
-      const contact = contacts.find(
-        (c) =>
-          c.address.toLowerCase() === sender.toLowerCase() &&
-          c.status === "established"
-      );
-
-      console.log("debub processMessageLog contact.identityPubKey ", contact.identityPubKey);
-
-      if (!contact || !contact.identityPubKey) {
-        onLog(
-          `❓ Received message from unknown contact: ${sender.slice(0, 8)}...`
-        );
-        return;
-      }
-
-      if (!identityKeyPair) {
-        onLog(
-          `⏳ Identity key not ready yet, skipping message from ${sender.slice(
-            0,
-            8
-          )}...`
-        );
-        return;
-      }
-
-      const ciphertextJson = new TextDecoder().decode(
-        hexToUint8Array(ciphertextBytes)
-      );
-
-      const decryptedMessage = decryptMessage(
-        ciphertextJson,
-        identityKeyPair.secretKey,
-        contact.signingPubKey
-      );
-
-      if (decryptedMessage) {
-        const newMessage: Message = {
-          id: log.transactionHash,
-          content: decryptedMessage,
-          sender,
-          timestamp: Date.now(),
-          type: "incoming",
-        };
-
-        setMessages((prev) => {
-          const existing = prev.find((m) => m.id === newMessage.id);
-          if (existing) return prev;
-          return [...prev, newMessage];
-        });
-
-        onLog(
-          `💬 Message from ${sender.slice(0, 8)}...: "${decryptedMessage}"`
-        );
-      } else {
-        onLog(`❌ Failed to decrypt message from ${sender.slice(0, 8)}...`);
-      }
-    } catch (error) {
-      console.error("Failed to process message log:", error);
-    }
-  };
-
-  // Initial backward scan (ultimi 10k blocchi)
+  // Initial backward scan
   const performInitialScan = useCallback(async () => {
     if (!readProvider || !address || isInitialLoading) return;
+
+    // Check if initial scan already completed for this address
+    const initialScanComplete = await dbService.getInitialScanComplete(address);
+    if (initialScanComplete) {
+      onLog(`✅ Initial scan already completed for ${address.slice(0, 8)}...`);
+      
+      // Load from database
+      const savedLastBlock = await dbService.getLastKnownBlock();
+      const savedOldestBlock = await dbService.getOldestScannedBlock();
+      
+      if (savedLastBlock) setLastKnownBlock(savedLastBlock);
+      if (savedOldestBlock) setOldestScannedBlock(savedOldestBlock);
+      
+      setCanLoadMore(savedOldestBlock ? savedOldestBlock > CONTRACT_CREATION_BLOCK : true);
+      return;
+    }
 
     setIsInitialLoading(true);
     onLog(`🚀 Starting initial scan of last ${INITIAL_SCAN_BLOCKS} blocks...`);
@@ -632,16 +295,10 @@ export const useMessageListener = ({
         CONTRACT_CREATION_BLOCK
       );
 
-      lastKnownBlock.current = currentBlock;
-      oldestScannedBlock.current = startBlock;
-
-      // Scan backward from tip
       const events = await scanBlockRange(startBlock, currentBlock);
 
-      // Process all events
-      for (const event of events) {
-        await processEvent(event);
-      }
+      // Process events
+      onEventsProcessed(events);
 
       // Store chunk info
       scanChunks.current = [
@@ -649,12 +306,18 @@ export const useMessageListener = ({
           fromBlock: startBlock,
           toBlock: currentBlock,
           loaded: true,
-          events,
+          events: events.map(e => e.rawLog),
         },
       ];
 
-      // Check if we can load more (not reached contract creation)
+      // Update state and database
+      setLastKnownBlock(currentBlock);
+      setOldestScannedBlock(startBlock);
       setCanLoadMore(startBlock > CONTRACT_CREATION_BLOCK);
+
+      await dbService.setLastKnownBlock(currentBlock);
+      await dbService.setOldestScannedBlock(startBlock);
+      await dbService.setInitialScanComplete(address, true);
 
       onLog(
         `✅ Initial scan complete: ${events.length} events found in blocks ${startBlock}-${currentBlock}`
@@ -664,7 +327,7 @@ export const useMessageListener = ({
     } finally {
       setIsInitialLoading(false);
     }
-  }, [readProvider, address, isInitialLoading, onLog]);
+  }, [readProvider, address, isInitialLoading, onLog, onEventsProcessed]);
 
   // Lazy load more history
   const loadMoreHistory = useCallback(async () => {
@@ -673,7 +336,7 @@ export const useMessageListener = ({
       !address ||
       isLoadingMore ||
       !canLoadMore ||
-      !oldestScannedBlock.current
+      !oldestScannedBlock
     ) {
       return;
     }
@@ -682,14 +345,13 @@ export const useMessageListener = ({
     onLog(`📂 Loading more history...`);
 
     try {
-      const endBlock = oldestScannedBlock.current - 1;
+      const endBlock = oldestScannedBlock - 1;
       const startBlock = Math.max(
         endBlock - INITIAL_SCAN_BLOCKS,
         CONTRACT_CREATION_BLOCK
       );
 
-      // ----------- INIZIO FIX -----------
-      // Trova l'effettivo blocco più recente davvero indicizzato in questo range
+      // Check if blocks are available
       let maxIndexedBlock = endBlock;
       for (let b = endBlock; b >= startBlock; b--) {
         const blk = await readProvider.getBlock(b);
@@ -698,20 +360,18 @@ export const useMessageListener = ({
           break;
         }
       }
-      // Se nessun blocco nel range è indicizzato, esci e riprova più tardi
+
       if (maxIndexedBlock < startBlock) {
         onLog(
-          `⚠️ Nessun blocco indicizzato trovato tra ${startBlock} e ${endBlock}. Riproverò più tardi.`
+          `⚠️ No indexed blocks found between ${startBlock} and ${endBlock}. Retrying later.`
         );
         setIsLoadingMore(false);
         return;
       }
-      // Aggiorna startBlock in base all'ultimo blocco effettivamente disponibile
+
       const safeStartBlock = Math.max(startBlock, CONTRACT_CREATION_BLOCK);
       const safeEndBlock = maxIndexedBlock;
-      // ----------- FINE FIX -----------
 
-      // Usa smart chunking per trovare range ottimali
       const ranges = await findEventRanges(safeStartBlock, safeEndBlock);
 
       if (ranges.length === 0) {
@@ -721,25 +381,23 @@ export const useMessageListener = ({
         return;
       }
 
-      // Scansiona solo i blocchi effettivamente disponibili!
       const events = await batchScanRanges(ranges);
 
-      for (const event of events) {
-        await processEvent(event);
-      }
+      // Process events
+      onEventsProcessed(events);
 
-      // Aggiorna i chunk tracciati
+      // Update chunks
       scanChunks.current.push({
         fromBlock: safeStartBlock,
         toBlock: safeEndBlock,
         loaded: true,
-        events,
+        events: events.map(e => e.rawLog),
       });
 
-      oldestScannedBlock.current = safeStartBlock;
-
-      // Continua solo se ci sono ancora blocchi più vecchi
+      // Update state and database
+      setOldestScannedBlock(safeStartBlock);
       setCanLoadMore(safeStartBlock > CONTRACT_CREATION_BLOCK);
+      await dbService.setOldestScannedBlock(safeStartBlock);
 
       onLog(
         `✅ Loaded ${events.length} more events from blocks ${safeStartBlock}-${safeEndBlock}`
@@ -749,38 +407,30 @@ export const useMessageListener = ({
     } finally {
       setIsLoadingMore(false);
     }
-  }, [readProvider, address, isLoadingMore, canLoadMore, onLog]);
+  }, [readProvider, address, isLoadingMore, canLoadMore, oldestScannedBlock, onLog, onEventsProcessed]);
 
-  // Real-time scanning for new blocks with safety buffer
+  // Real-time scanning for new blocks
   useEffect(() => {
-    if (!readProvider || !address || !lastKnownBlock.current) return;
+    if (!readProvider || !address || !lastKnownBlock) return;
 
     const interval = setInterval(async () => {
       try {
         const currentBlock = await readProvider.getBlockNumber();
-        const maxSafeBlock = currentBlock - REAL_TIME_BUFFER; // Buffer per evitare blocchi non indicizzati
+        const maxSafeBlock = currentBlock - REAL_TIME_BUFFER;
 
-        if (maxSafeBlock > lastKnownBlock.current!) {
-          // Scansiona solo blocchi "sicuri" (non troppo freschi)
-          const startScanBlock = lastKnownBlock.current! + 1;
+        if (maxSafeBlock > lastKnownBlock) {
+          const startScanBlock = lastKnownBlock + 1;
           const events = await scanBlockRange(startScanBlock, maxSafeBlock);
 
-          for (const event of events) {
-            await processEvent(event);
-          }
-
-          lastKnownBlock.current = maxSafeBlock;
-
-          console.log(
-            `🔄 Real-time scan updated to block ${maxSafeBlock} (last known: ${startScanBlock})`
-          );
-          console.log(`Processed ${events.length} new events`);
-
           if (events.length > 0) {
+            onEventsProcessed(events);
             onLog(
               `🔄 Found ${events.length} new events in blocks ${startScanBlock}-${maxSafeBlock}`
             );
           }
+
+          setLastKnownBlock(maxSafeBlock);
+          await dbService.setLastKnownBlock(maxSafeBlock);
         }
       } catch (error) {
         onLog(`⚠️ Real-time scan error: ${error}`);
@@ -788,36 +438,41 @@ export const useMessageListener = ({
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [readProvider, address, onLog]);
+  }, [readProvider, address, lastKnownBlock, onLog, onEventsProcessed]);
+
+    // Clear state when address changes
+  useEffect(() => {
+    if (address) {
+      setIsInitialLoading(false);
+      setIsLoadingMore(false);
+      setCanLoadMore(true);
+      setSyncProgress(null);
+      setLastKnownBlock(null);
+      setOldestScannedBlock(null);
+      processedLogs.current.clear();
+      scanChunks.current = [];
+    }
+  }, [address]);
 
   // Initialize
   useEffect(() => {
     if (
       readProvider &&
       address &&
-      identityKeyPair &&
       !isInitialLoading &&
       scanChunks.current.length === 0
     ) {
       performInitialScan();
     }
-  }, [readProvider, address, identityKeyPair, performInitialScan]);
+  }, [readProvider, address, performInitialScan]);
 
   return {
-    messages,
-    pendingHandshakes,
     isInitialLoading,
     isLoadingMore,
     canLoadMore,
     syncProgress,
     loadMoreHistory,
-    // Helper to add messages from UI
-    addMessage: (message: Message) => {
-      setMessages((prev) => [...prev, message]);
-    },
-    // Helper to remove pending handshakes
-    removePendingHandshake: (id: string) => {
-      setPendingHandshakes((prev) => prev.filter((h) => h.id !== id));
-    },
+    lastKnownBlock,
+    oldestScannedBlock,
   };
 };

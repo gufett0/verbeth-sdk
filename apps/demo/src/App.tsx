@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState, useCallback } from "react";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useWalletClient } from 'wagmi';
 import { useRpcProvider } from './rpc.js';
-import { Contract, BrowserProvider, keccak256, toUtf8Bytes } from "ethers";
+import { BrowserProvider, keccak256, toUtf8Bytes } from "ethers";
 import {
   LogChainV1__factory,
   type LogChainV1,
@@ -19,200 +19,191 @@ import {
   DerivationProof
 } from '@verbeth/sdk';
 import { useMessageListener } from './hooks/useMessageListener.js';
-
-
-const LOGCHAIN_SINGLETON_ADDR = "0xb0fD25AAa5f901D9A0931b19287776440FaBd031";
-//const LOGCHAINPROXY_ADDR = "0x8e201F948de464ab0a08eAeA9692BbA3dB5D97C1";
-const CONTRACT_CREATION_BLOCK = 32902584;
-
-interface Contact {
-  address: string;
-  identityPubKey?: Uint8Array;      // X25519 key for encryption
-  signingPubKey?: Uint8Array;       // Ed25519 key for signing  
-  ephemeralKey?: Uint8Array;
-  topic?: string;
-  status: 'none' | 'handshake_sent' | 'established';
-  lastMessage?: string;
-  lastTimestamp?: number;
-}
+import { useMessageProcessor } from './hooks/useMessageProcessor.js';
+import { dbService } from './services/DbService.js';
+import {
+  LOGCHAIN_SINGLETON_ADDR,
+  CONTRACT_CREATION_BLOCK,
+  Contact,
+  StoredIdentity
+} from './types.js';
 
 export default function App() {
   const readProvider = useRpcProvider();
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
-  const [signer, setSigner] = useState<any>(null);
-
 
   // State
   const [ready, setReady] = useState(false);
   const [recipientAddress, setRecipientAddress] = useState("");
   const [message, setMessage] = useState("");
-  const [contacts, setContacts] = useState<Contact[]>([]);
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
+  const [currentAccount, setCurrentAccount] = useState<string | null>(null);
 
   const [identityKeyPair, setIdentityKeyPair] = useState<IdentityKeyPair | null>(null);
   const [derivationProof, setDerivationProof] = useState<DerivationProof | null>(null);
   const [executor, setExecutor] = useState<IExecutor | null>(null);
   const [contract, setContract] = useState<LogChainV1 | null>(null);
+  const [signer, setSigner] = useState<any>(null);
 
-
-  // Refs
+  // Refs for debouncing
+  const initTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const logRef = useRef<HTMLTextAreaElement>(null);
 
-
-  useEffect(() => {
-    setReady(readProvider !== null && isConnected && walletClient !== undefined);
-  }, [readProvider, isConnected, walletClient]);
-
-
-  useEffect(() => {
-    const initializeIdentityKey = async () => {
-      if (address && signer) {
-        try {
-          const cacheKey = `verbeth_identity_${address.toLowerCase()}`;
-          const cachedData = localStorage.getItem(cacheKey);
-
-          if (cachedData) {
-            try {
-              const parsed = JSON.parse(cachedData);
-              const restoredKeyPair: IdentityKeyPair = {
-                publicKey: new Uint8Array(parsed.keyPair.publicKey),
-                secretKey: new Uint8Array(parsed.keyPair.secretKey),
-                signingPublicKey: new Uint8Array(parsed.keyPair.signingPublicKey),
-                signingSecretKey: new Uint8Array(parsed.keyPair.signingSecretKey)
-              };
-              const restoredProof: DerivationProof = {
-                message: parsed.derivationProof.message,
-                signature: parsed.derivationProof.signature
-              };
-
-              setIdentityKeyPair(restoredKeyPair);
-              setDerivationProof(restoredProof);
-              addLog(`✅ Identity keys restored from cache: ${Buffer.from(restoredKeyPair.publicKey).toString('hex').slice(0, 16)}...`);
-              return;
-            } catch (error) {
-              console.warn("Failed to restore cached keys, deriving new ones:", error);
-            }
-          }
-
-          addLog("🔑 Deriving identity key from wallet...");
-          const result = await deriveIdentityKeyPairWithProof(signer, address);
-          setIdentityKeyPair(result.keyPair);
-          setDerivationProof(result.derivationProof);
-
-          const toCache = {
-            keyPair: {
-              publicKey: Array.from(result.keyPair.publicKey),
-              secretKey: Array.from(result.keyPair.secretKey),
-              signingPublicKey: Array.from(result.keyPair.signingPublicKey),
-              signingSecretKey: Array.from(result.keyPair.signingSecretKey)
-            },
-            derivationProof: result.derivationProof
-          };
-          localStorage.setItem(cacheKey, JSON.stringify(toCache));
-
-          addLog(`✅ Identity key derived and cached: ${Buffer.from(result.keyPair.publicKey).toString('hex').slice(0, 16)}...`);
-        } catch (error) {
-          console.error("Failed to derive identity key:", error);
-          addLog(`❌ Failed to derive identity key: ${error instanceof Error ? error.message : 'Unknown error'}`);
-        }
-      }
-    };
-
-    initializeIdentityKey();
-  }, [address, signer]);
-
-  // Helper functions
-  const addLog = (message: string) => {
+  const addLog = useCallback((message: string) => {
     if (logRef.current) {
       const timestamp = new Date().toLocaleTimeString();
       logRef.current.value += `[${timestamp}] ${message}\n`;
       logRef.current.scrollTop = logRef.current.scrollHeight;
     }
-  };
+  }, []);
 
-  // Message listener hook - FIXED: Pass all required props
+  // Message processor hook
   const {
     messages,
     pendingHandshakes,
+    contacts,
+    addMessage,
+    removePendingHandshake,
+    updateContact,
+    processEvents
+  } = useMessageProcessor({
+    readProvider,
+    address,
+    identityKeyPair,
+    onLog: addLog
+  });
+
+  // Message listener hook
+  const {
     isInitialLoading,
     isLoadingMore,
     canLoadMore,
     syncProgress,
     loadMoreHistory,
-    addMessage,
-    removePendingHandshake
   } = useMessageListener({
     readProvider,
     address,
     contacts,
-    identityKeyPair: identityKeyPair,
-    onContactsUpdate: (newContacts) => saveContacts(newContacts),
-    onLog: addLog
+    onLog: addLog,
+    onEventsProcessed: processEvents
   });
 
-  // Initialize contract and identity key
   useEffect(() => {
-    if (!ready || !readProvider || !walletClient || !address) return;
+    setReady(readProvider !== null && isConnected && walletClient !== undefined);
+  }, [readProvider, isConnected, walletClient]);
 
-    const initContract = async () => {
-      try {
-        const ethersProvider = new BrowserProvider(walletClient.transport);
-        const ethersSigner = await ethersProvider.getSigner();
-        const contractInstance = LogChainV1__factory.connect(LOGCHAIN_SINGLETON_ADDR, ethersSigner as any);
+  // FIXED: Consolidated initialization with debouncing
+  useEffect(() => {
+    // Clear any pending timeout
+    if (initTimeoutRef.current) {
+      clearTimeout(initTimeoutRef.current);
+    }
 
-        setContract(contractInstance);
-        setSigner(ethersSigner);
+    // Debounce initialization to prevent double execution
+    initTimeoutRef.current = setTimeout(async () => {
+      await handleInitialization();
+    }, 100);
 
-        const executorInstance = ExecutorFactory.createEOA(contractInstance);
-        setExecutor(executorInstance);
-
-        addLog("✅ Contract and executor initialized and ready");
-      } catch (error) {
-        console.error("Failed to initialize contract:", error);
-        addLog("❌ Failed to initialize contract");
+    return () => {
+      if (initTimeoutRef.current) {
+        clearTimeout(initTimeoutRef.current);
       }
     };
-
-    initContract();
   }, [ready, readProvider, walletClient, address]);
 
-  // Load contacts from localStorage
-  useEffect(() => {
+  const handleInitialization = async () => {
     try {
-      const stored = localStorage.getItem('verbeth_contacts');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setContacts(parsed.map((c: any) => ({
-          ...c,
-          identityPubKey: c.identityPubKey ? new Uint8Array(c.identityPubKey) : undefined,
-          signingPubKey: c.signingPubKey ? new Uint8Array(c.signingPubKey) : undefined,
-          ephemeralKey: c.ephemeralKey ? new Uint8Array(c.ephemeralKey) : undefined
-        })));
+      // Reset everything if not ready
+      if (!ready || !readProvider || !walletClient || !address) {
+        setCurrentAccount(null);
+        setIdentityKeyPair(null);
+        setDerivationProof(null);
+        setSelectedContact(null);
+        setSigner(null);
+        setContract(null);
+        setExecutor(null);
+        return;
       }
-    } catch (error) {
-      console.error("Failed to load contacts:", error);
-    }
-  }, []);
 
-  // Save contacts to localStorage
-  const saveContacts = useCallback((newContacts: Contact[]) => {
-    try {
-      const serializable = newContacts.map(c => ({
-        ...c,
-        identityPubKey: c.identityPubKey ? Array.from(c.identityPubKey) : undefined,
-        signingPubKey: c.signingPubKey ? Array.from(c.signingPubKey) : undefined,
-        ephemeralKey: c.ephemeralKey ? Array.from(c.ephemeralKey) : undefined
-      }));
-      localStorage.setItem('verbeth_contacts', JSON.stringify(serializable));
-      setContacts(newContacts);
-    } catch (error) {
-      console.error("Failed to save contacts:", error);
-    }
-  }, []);
+      // Step 1: Initialize contract and signer FIRST
+      addLog(`🔄 Initializing for account: ${address.slice(0, 8)}...`);
+      
+      const ethersProvider = new BrowserProvider(walletClient.transport);
+      const ethersSigner = await ethersProvider.getSigner();
+      
+      // Verify signer matches the current address
+      const signerAddress = await ethersSigner.getAddress();
+      if (signerAddress.toLowerCase() !== address.toLowerCase()) {
+        addLog(`❌ Signer mismatch: expected ${address.slice(0, 8)}, got ${signerAddress.slice(0, 8)}`);
+        return;
+      }
 
-  // Use correct SDK initiateHandshake function signature
+      const contractInstance = LogChainV1__factory.connect(LOGCHAIN_SINGLETON_ADDR, ethersSigner as any);
+      const executorInstance = ExecutorFactory.createEOA(contractInstance);
+
+      // Set contract and signer
+      setContract(contractInstance);
+      setSigner(ethersSigner);
+      setExecutor(executorInstance);
+
+      // Step 2: Handle account change if needed
+      if (address !== currentAccount) {
+        addLog(`🔄 Account ${currentAccount ? 'changed' : 'connected'}: ${address.slice(0, 8)}...`);
+        
+        // Clear current state
+        setIdentityKeyPair(null);
+        setDerivationProof(null);
+        setSelectedContact(null);
+        
+        // Switch account in database service
+        await dbService.switchAccount(address);
+        
+        // Update current account
+        setCurrentAccount(address);
+      }
+
+      // Step 3: Initialize or load identity
+      addLog(`🔑 Loading identity for ${address.slice(0, 8)}...`);
+      
+      // Check database first
+      const storedIdentity = await dbService.getIdentity(address);
+      
+      if (storedIdentity) {
+        setIdentityKeyPair(storedIdentity.keyPair);
+        setDerivationProof(storedIdentity.proof ?? null);
+        addLog(`✅ Identity keys restored from database: ${Buffer.from(storedIdentity.keyPair.publicKey).toString('hex').slice(0, 16)}...`);
+      } else {
+        // Derive new identity
+        addLog("🔑 Deriving new identity key from wallet...");
+        const result = await deriveIdentityKeyPairWithProof(ethersSigner, address);
+        
+        setIdentityKeyPair(result.keyPair);
+        setDerivationProof(result.derivationProof);
+
+        // Save to database
+        const identityToStore: StoredIdentity = {
+          address,
+          keyPair: result.keyPair,
+          derivedAt: Date.now(),
+          proof: result.derivationProof
+        };
+        
+        await dbService.saveIdentity(identityToStore);
+
+        addLog(`✅ New identity key derived and saved: ${Buffer.from(result.keyPair.publicKey).toString('hex').slice(0, 16)}...`);
+      }
+
+      addLog("✅ Initialization complete");
+
+    } catch (error) {
+      console.error("Failed to initialize:", error);
+      addLog(`❌ Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Send handshake
   const sendHandshake = async () => {
     if (!executor || !address || !recipientAddress || !message || !identityKeyPair || !derivationProof || !signer) {
       addLog("❌ Missing required data for handshake");
@@ -235,6 +226,7 @@ export default function App() {
 
       const newContact: Contact = {
         address: recipientAddress,
+        ownerAddress: address,
         status: 'handshake_sent',
         ephemeralKey: ephemeralKeyPair.secretKey,
         topic: tx.hash,
@@ -242,8 +234,8 @@ export default function App() {
         lastTimestamp: Date.now()
       };
 
-      const updatedContacts = [...contacts.filter(c => c.address !== recipientAddress), newContact];
-      saveContacts(updatedContacts);
+      // Save to database
+      await updateContact(newContact);
 
       addLog(`📤 Handshake sent to ${recipientAddress.slice(0, 8)}...: "${message}" (tx: ${tx.hash})`);
       setMessage("");
@@ -255,7 +247,7 @@ export default function App() {
     }
   };
 
-  // Use SDK encryptStructuredPayload function
+  // Accept handshake
   const acceptHandshake = async (handshake: any, responseMessage: string) => {
     if (!executor || !address || !identityKeyPair || !derivationProof || !signer) {
       addLog("❌ Missing required data for handshake response");
@@ -273,20 +265,19 @@ export default function App() {
         signer
       });
 
-      // Salva le chiavi separate per il contact
       const newContact: Contact = {
         address: handshake.sender,
+        ownerAddress: address,
         status: 'established',
-        identityPubKey: handshake.identityPubKey,  // X25519 per encryption
-        signingPubKey: handshake.signingPubKey,    // Ed25519 per signing
+        identityPubKey: handshake.identityPubKey,
+        signingPubKey: handshake.signingPubKey,
         lastMessage: responseMessage,
         lastTimestamp: Date.now()
       };
 
-      const updatedContacts = [...contacts.filter(c => c.address !== handshake.sender), newContact];
-      saveContacts(updatedContacts);
-
-      removePendingHandshake(handshake.id);
+      // Save to database
+      await updateContact(newContact);
+      await removePendingHandshake(handshake.id);
 
       addLog(`✅ Handshake accepted from ${handshake.sender.slice(0, 8)}...: "${responseMessage}"`);
     } catch (error) {
@@ -312,9 +303,10 @@ export default function App() {
         setLoading(false);
         return;
       }
+
       const identityAsSigningKey = {
-        publicKey: identityKeyPair.signingPublicKey,  // ⭐ Ed25519 public key (64 bytes)
-        secretKey: identityKeyPair.signingSecretKey   // ⭐ Ed25519 secret key (64 bytes)
+        publicKey: identityKeyPair.signingPublicKey,
+        secretKey: identityKeyPair.signingSecretKey
       };
 
       await sendEncryptedMessage({
@@ -329,10 +321,20 @@ export default function App() {
 
       const newMessage = {
         id: `${Date.now()}-${Math.random()}`,
-        content: messageText,
+        topic,
         sender: address,
+        recipient: contact.address,
+        ciphertext: '', // Will be filled by actual encryption
         timestamp: Date.now(),
-        type: 'outgoing' as const
+        blockTimestamp: Date.now(),
+        blockNumber: 0, // Will be updated when confirmed
+        direction: 'outgoing' as const,
+        decrypted: messageText,
+        read: true,
+        nonce: 0, // Will be updated
+        dedupKey: `${address}:${topic}:${Date.now()}`,
+        type: 'text' as const,
+        ownerAddress: address
       };
 
       addMessage(newMessage);
@@ -422,7 +424,7 @@ export default function App() {
                             type="text"
                             placeholder="Response message"
                             className="flex-1 px-2 py-1 bg-gray-800 border border-gray-600 rounded text-xs"
-                            id={`response-${handshake.id}`}  // ID unico per ogni handshake
+                            id={`response-${handshake.id}`}
                             onKeyDown={(e) => {
                               if (e.key === 'Enter') {
                                 const target = e.target as HTMLInputElement;
@@ -526,19 +528,19 @@ export default function App() {
                     {messages
                       .filter(m =>
                         m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
-                        (m.type === 'outgoing' && selectedContact)
+                        (m.direction === 'outgoing' && selectedContact)
                       )
                       .map((msg) => (
                         <div
                           key={msg.id}
-                          className={`p-2 rounded max-w-xs ${msg.type === 'outgoing'
+                          className={`p-2 rounded max-w-xs ${msg.direction === 'outgoing'
                             ? 'bg-blue-600 ml-auto'
                             : msg.type === 'system'
                               ? 'bg-gray-700 mx-auto text-center text-xs'
                               : 'bg-gray-700'
                             }`}
                         >
-                          <p className="text-sm">{msg.content}</p>
+                          <p className="text-sm">{msg.decrypted || msg.ciphertext}</p>
                           <span className="text-xs text-gray-300">
                             {new Date(msg.timestamp).toLocaleTimeString()}
                           </span>
@@ -546,7 +548,7 @@ export default function App() {
                       ))}
                     {messages.filter(m =>
                       m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
-                      (m.type === 'outgoing' && selectedContact)
+                      (m.direction === 'outgoing' && selectedContact)
                     ).length === 0 && (
                         <p className="text-gray-400 text-sm text-center py-8">
                           No messages yet. {selectedContact.status === 'established' ? 'Start the conversation!' : 'Complete the handshake first.'}
@@ -604,7 +606,6 @@ export default function App() {
           <div className="flex justify-between items-center mb-4">
             <div className="flex items-center gap-4">
               <h2 className="text-lg font-semibold">Activity Log</h2>
-              {/* Global Load More History Button */}
               {canLoadMore && ready && (
                 <button
                   onClick={loadMoreHistory}
@@ -649,6 +650,11 @@ export default function App() {
           <p>Network: Base</p>
           <p>Contract creation block: {CONTRACT_CREATION_BLOCK}</p>
           <p>Status: {ready ? '🟢 Ready' : '🔴 Not Ready'} {(isInitialLoading || isLoadingMore) ? '⏳ Loading' : ''}</p>
+          {/* Debug info for development */}
+          <p>Current Account: {currentAccount?.slice(0, 8) || 'None'}...</p>
+          <p>Connected Address: {address?.slice(0, 8) || 'None'}...</p>
+          <p>Signer Available: {signer ? '✅' : '❌'}</p>
+          <p>Identity Available: {identityKeyPair ? '✅' : '❌'}</p>
         </div>
       </div>
     </div>

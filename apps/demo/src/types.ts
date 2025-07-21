@@ -5,7 +5,7 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 export const LOGCHAIN_SINGLETON_ADDR =
   '0xb0fD25AAa5f901D9A0931b19287776440FaBd031';
 export const CONTRACT_CREATION_BLOCK = 32_902_584;
-export const INITIAL_SCAN_BLOCKS = 10_000;
+export const INITIAL_SCAN_BLOCKS = 1_000;
 export const MAX_RETRIES = 3;
 export const MAX_RANGE_PROVIDER = 2_000;
 export const CHUNK_SIZE = 2_000;

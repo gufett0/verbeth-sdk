@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Send, X } from "lucide-react";
+import { Send, X, CheckIcon, XIcon } from "lucide-react";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useWalletClient } from 'wagmi';
 import { useRpcProvider } from './rpc.js';
@@ -43,6 +43,7 @@ export default function App() {
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
   const [loading, setLoading] = useState(false);
   const [currentAccount, setCurrentAccount] = useState<string | null>(null);
+  const [showHandshakeForm, setShowHandshakeForm] = useState(true);
 
   const [identityKeyPair, setIdentityKeyPair] = useState<IdentityKeyPair | null>(null);
   const [derivationProof, setDerivationProof] = useState<DerivationProof | null>(null);
@@ -50,7 +51,7 @@ export default function App() {
   const [contract, setContract] = useState<LogChainV1 | null>(null);
   const [signer, setSigner] = useState<any>(null);
 
-  // Refs for logging - moved to top
+  // Refs for logging
   const logRef = useRef<HTMLTextAreaElement>(null);
 
   const addLog = useCallback((message: string) => {
@@ -61,7 +62,6 @@ export default function App() {
     }
   }, []);
 
-  // ✅ FIXED: Always call hooks in the same order - don't conditionally call them
   const {
     messages,
     pendingHandshakes,
@@ -97,6 +97,11 @@ export default function App() {
   useEffect(() => {
     handleInitialization();
   }, [ready, readProvider, walletClient, address]);
+
+  // Hide handshake form when we have contacts
+  useEffect(() => {
+    setShowHandshakeForm(contacts.length === 0);
+  }, [contacts.length]);
 
   const handleInitialization = useCallback(async () => {
     try {
@@ -222,8 +227,34 @@ export default function App() {
       // Save to database
       await updateContact(newContact);
 
+      // Auto-select the new contact and add handshake message to chat
+      setSelectedContact(newContact);
+
+      // Add handshake message as system message in chat
+      const handshakeMessage = {
+        id: generateTempMessageId(),
+        topic: generateConversationTopic(address, recipientAddress),
+        sender: address,
+        recipient: recipientAddress,
+        ciphertext: '',
+        timestamp: Date.now(),
+        blockTimestamp: Date.now(),
+        blockNumber: 0,
+        direction: 'outgoing' as const,
+        decrypted: `Handshake sent: "${message}"`,
+        read: true,
+        nonce: 0,
+        dedupKey: `handshake-${tx.hash}`,
+        type: 'system' as const,
+        ownerAddress: address,
+        status: 'pending' as const
+      };
+
+      await addMessage(handshakeMessage);
+
       addLog(`Handshake sent to ${recipientAddress.slice(0, 8)}...: "${message}" (tx: ${tx.hash})`);
       setMessage("");
+      setRecipientAddress("");
     } catch (error) {
       console.error("Failed to send handshake:", error);
       addLog(`✗ Failed to send handshake: ${error instanceof Error ? error.message : 'Unknown error'}`);
@@ -264,6 +295,9 @@ export default function App() {
       await updateContact(newContact);
       await removePendingHandshake(handshake.id);
 
+      // Auto-select the new contact
+      setSelectedContact(newContact);
+
       addLog(`✅ Handshake accepted from ${handshake.sender.slice(0, 8)}...: "${responseMessage}"`);
     } catch (error) {
       console.error("Failed to accept handshake:", error);
@@ -271,7 +305,7 @@ export default function App() {
     }
   };
 
-  // ✅ FIXED: Send message to established contact with proper topic and nonce tracking
+  // Send message to established contact
   const sendMessageToContact = async (contact: Contact, messageText: string) => {
     if (!executor || !address || !contact.identityPubKey || !identityKeyPair) {
       addLog("✗ Contact not established or missing data");
@@ -280,7 +314,7 @@ export default function App() {
 
     setLoading(true);
     try {
-      // ✅ Generate consistent topic for this conversation
+      // Generate consistent topic for this conversation
       const topic = generateConversationTopic(address, contact.address);
       const timestamp = Math.floor(Date.now() / 1000);
       const identityAsSigningKey = {
@@ -288,7 +322,7 @@ export default function App() {
         secretKey: identityKeyPair.signingSecretKey
       };
 
-      const expectedNonce = Number(getNextNonce(address, topic)) + 1; // +1 to match SDK logic (because SDK will call getNextNonce before sending)
+      const expectedNonce = Number(getNextNonce(address, topic)) + 1;
 
       // Create and save the pending message BEFORE sending
       const pendingMessage = {
@@ -296,10 +330,10 @@ export default function App() {
         topic,
         sender: address,
         recipient: contact.address,
-        ciphertext: '', // Will be filled when confirmed
+        ciphertext: '',
         timestamp: timestamp * 1000,
         blockTimestamp: Date.now(),
-        blockNumber: 0, // Will be updated when confirmed
+        blockNumber: 0,
         direction: 'outgoing' as const,
         decrypted: messageText,
         read: true,
@@ -324,7 +358,7 @@ export default function App() {
         timestamp
       });
 
-      // ✅ Update contact's lastMessage and lastTimestamp
+      // Update contact's lastMessage and lastTimestamp
       const updatedContact: Contact = {
         ...contact,
         lastMessage: messageText,
@@ -350,6 +384,62 @@ export default function App() {
           <ConnectButton />
         </div>
 
+        {/* Notification Banner for Pending Handshakes */}
+        {pendingHandshakes.length > 0 && (
+          <div className="mb-6">
+            {pendingHandshakes.map((handshake) => (
+              <div key={handshake.id} className="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mb-2">
+                <div className="flex justify-between items-start">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-sm font-medium">Handshake from {handshake.sender.slice(0, 8)}...</span>
+                      <span className="text-xs">{handshake.verified ? '✅ Verified' : '⚠️ Unverified'}</span>
+                    </div>
+                    <p className="text-sm text-gray-300 mb-3">"{handshake.message}"</p>
+                    <div className="flex gap-2 items-center">
+                      <input
+                        type="text"
+                        placeholder="Your response..."
+                        className="flex-1 px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm"
+                        id={`response-${handshake.id}`}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            const target = e.target as HTMLInputElement;
+                            if (target.value.trim()) {
+                              acceptHandshake(handshake, target.value.trim());
+                              target.value = '';
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          const input = document.getElementById(`response-${handshake.id}`) as HTMLInputElement;
+                          if (input?.value.trim()) {
+                            acceptHandshake(handshake, input.value.trim());
+                            input.value = '';
+                          }
+                        }}
+                        className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm flex items-center gap-1"
+                      >
+                        <CheckIcon size={14} />
+                        Accept
+                      </button>
+                      <button
+                        onClick={() => removePendingHandshake(handshake.id)}
+                        className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm flex items-center gap-1"
+                      >
+                        <XIcon size={14} />
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {!ready ? (
           <div className="text-center py-16">
             <p className="text-gray-400 text-lg">
@@ -365,99 +455,62 @@ export default function App() {
               </div>
             )}
           </div>
-        ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left Panel - Handshake */}
-            <div className="space-y-6">
-              <div className="border border-gray-800 rounded-lg p-4">
-                <h2 className="text-lg font-semibold mb-4">Start Handshake</h2>
-                <div className="space-y-3">
-                  <input
-                    type="text"
-                    placeholder="Recipient address (0x...)"
-                    value={recipientAddress}
-                    onChange={(e) => setRecipientAddress(e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-white"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Message"
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
-                    className="w-full px-3 py-2 bg-gray-900 border border-gray-700 rounded text-white"
-                  />
+        ) : showHandshakeForm ? (
+          /* Centered Handshake Form */
+          <div className="flex items-center justify-center min-h-[60vh]">
+            <div className="border border-gray-800 rounded-lg p-8 w-full max-w-md">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-semibold">
+                  {contacts.length === 0 ? "Start Your First Conversation" : "New Conversation"}
+                </h2>
+                {contacts.length > 0 && (
                   <button
-                    onClick={sendHandshake}
-                    disabled={loading || !recipientAddress || !message}
-                    className="w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded font-medium"
+                    onClick={() => setShowHandshakeForm(false)}
+                    className="text-sm text-gray-400 hover:text-white flex items-center gap-1 transition-colors"
                   >
-                    {loading ? "Sending..." : "Send Handshake"}
+                    ← Back to chats
                   </button>
-                </div>
+                )}
               </div>
-
-              {/* Pending Handshakes */}
-              {pendingHandshakes.length > 0 && (
-                <div className="border border-gray-800 rounded-lg p-4">
-                  <h2 className="text-lg font-semibold mb-4">Pending Handshakes</h2>
-                  <div className="space-y-3">
-                    {pendingHandshakes.map((handshake) => (
-                      <div key={handshake.id} className="bg-gray-900 p-3 rounded">
-                        <div className="flex justify-between items-start mb-2">
-                          <span className="text-sm text-gray-400">
-                            From: {handshake.sender.slice(0, 8)}...
-                          </span>
-                          <span className="text-xs">
-                            {handshake.verified ? '✅' : '⚠️'}
-                          </span>
-                        </div>
-                        <p className="text-sm mb-2">"{handshake.message}"</p>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            placeholder="Response message"
-                            className="flex-1 px-2 py-1 bg-gray-800 border border-gray-600 rounded text-xs"
-                            id={`response-${handshake.id}`}
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter') {
-                                const target = e.target as HTMLInputElement;
-                                acceptHandshake(handshake, target.value);
-                                target.value = '';
-                              }
-                            }}
-                          />
-                          <button
-                            onClick={() => {
-                              const input = document.getElementById(`response-${handshake.id}`) as HTMLInputElement;
-                              if (input?.value) {
-                                acceptHandshake(handshake, input.value);
-                                input.value = '';
-                              }
-                            }}
-                            className="px-2 py-1 bg-green-600 hover:bg-green-700 rounded text-xs flex items-center justify-center"
-                            title="Invia risposta"
-                          >
-                            <Send size={16} className="text-white" />
-                          </button>
-                          <button
-                            onClick={() => removePendingHandshake(handshake.id)}
-                            className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs flex items-center justify-center ml-2"
-                            title="Rifiuta handshake"
-                          >
-                            <X size={16} className="text-white" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
+              <div className="space-y-4">
+                <input
+                  type="text"
+                  placeholder="Recipient address (0x...)"
+                  value={recipientAddress}
+                  onChange={(e) => setRecipientAddress(e.target.value)}
+                  className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded text-white"
+                />
+                <input
+                  type="text"
+                  placeholder="Your message"
+                  value={message}
+                  onChange={(e) => setMessage(e.target.value)}
+                  className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded text-white"
+                />
+                <button
+                  onClick={sendHandshake}
+                  disabled={loading || !recipientAddress || !message}
+                  className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded font-medium"
+                >
+                  {loading ? "Sending..." : "Send Handshake"}
+                </button>
+              </div>
             </div>
-
-            {/* Middle Panel - Contacts */}
+          </div>
+        ) : (
+          /* Main Chat Layout */
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left Panel - Contacts */}
             <div className="border border-gray-800 rounded-lg p-4">
-              <h2 className="text-lg font-semibold mb-4">Contacts</h2>
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-semibold">Contacts</h2>
+                <button
+                  onClick={() => setShowHandshakeForm(true)}
+                  className="text-sm px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded"
+                >
+                  + New
+                </button>
+              </div>
               <div className="space-y-2">
                 {contacts.map((contact) => (
                   <div
@@ -488,16 +541,11 @@ export default function App() {
                     )}
                   </div>
                 ))}
-                {contacts.length === 0 && (
-                  <p className="text-gray-400 text-sm text-center py-4">
-                    No contacts yet. Start a handshake to add contacts.
-                  </p>
-                )}
               </div>
             </div>
 
-            {/* Right Panel - Conversation */}
-            <div className="border border-gray-800 rounded-lg p-4 flex flex-col h-96">
+            {/* Right Panel - Conversation (spans 2 columns) */}
+            <div className="lg:col-span-2 border border-gray-800 rounded-lg p-4 flex flex-col h-96">
               <h2 className="text-lg font-semibold mb-4">
                 {selectedContact ? `Chat with ${selectedContact.address.slice(0, 8)}...` : 'Select a contact'}
               </h2>
@@ -536,7 +584,7 @@ export default function App() {
                           m.topic === conversationTopic
                         );
                       })
-                      .sort((a, b) => a.timestamp - b.timestamp) // Sort by timestamp
+                      .sort((a, b) => a.timestamp - b.timestamp)
                       .map((msg) => (
                         <div
                           key={msg.id}
@@ -571,7 +619,7 @@ export default function App() {
                       );
                     }).length === 0 && (
                         <p className="text-gray-400 text-sm text-center py-8">
-                          No messages yet. {selectedContact.status === 'established' ? 'Start the conversation!' : 'Complete the handshake first.'}
+                          No messages yet. {selectedContact.status === 'established' ? 'Start the conversation!' : 'Waiting for handshake completion.'}
                         </p>
                       )}
                   </div>
@@ -608,7 +656,7 @@ export default function App() {
 
                   {selectedContact.status !== 'established' && (
                     <div className="text-center py-4 text-gray-400 text-sm">
-                      Handshake required before sending messages
+                      Handshake in progress... waiting for response
                     </div>
                   )}
                 </>

@@ -54,6 +54,7 @@ export interface Message {
   nonce: number; // Sender nonce for replay protection
   dedupKey: string; // `${sender}:${topic}:${nonce}`
   type: 'text' | 'system';
+  status: 'pending' | 'confirmed' | 'failed';
 }
 
 export interface PendingHandshake {
@@ -135,3 +136,11 @@ export interface MessageProcessorResult {
   updateContact: (contact: Contact) => void;
   processEvents: (events: ProcessedEvent[]) => Promise<void>;
 }
+
+
+export function generateConversationTopic(address1: string, address2: string): string {
+  const addresses = [address1.toLowerCase(), address2.toLowerCase()].sort();
+  return keccak256(toUtf8Bytes(`chat:${addresses[0]}:${addresses[1]}`));
+}
+
+export const generateTempMessageId = () => `temp-${Date.now()}-${Math.random()}`;

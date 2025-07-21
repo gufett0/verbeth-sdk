@@ -20,7 +20,7 @@ export class VerbEthDatabase extends Dexie {
       identity: 'address',
       contacts: 'address, ownerAddress, lastTimestamp, status',
       messages:
-        'id, ownerAddress, sender, recipient, topic, nonce, timestamp, blockTimestamp, read',
+        'id, ownerAddress, sender, recipient, topic, nonce, timestamp, blockTimestamp, read, status, [ownerAddress+sender+status], [ownerAddress+sender+topic+nonce+status], [sender+topic+nonce], dedupKey',
       pendingHandshakes: 'id, ownerAddress, sender, timestamp, verified',
       settings: 'name',
     });

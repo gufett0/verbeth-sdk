@@ -51,7 +51,7 @@ export class DbService {
         );
       } else {
         console.error(
-          `❌ Identity NOT found after save for ${normalizedAddress.slice(
+          `✗ Identity NOT found after save for ${normalizedAddress.slice(
             0,
             8
           )}...`
@@ -61,7 +61,7 @@ export class DbService {
       return result;
     } catch (error) {
       console.error(
-        `❌ Failed to save identity for ${normalizedAddress.slice(0, 8)}...:`,
+        `✗ Failed to save identity for ${normalizedAddress.slice(0, 8)}...:`,
         error
       );
       throw error;
@@ -71,7 +71,7 @@ export class DbService {
   async getIdentity(address: string) {
     const normalizedAddress = this.normalizeAddress(address);
     console.log(
-      `🔍 Looking for identity: ${normalizedAddress.slice(
+      `Looking for identity: ${normalizedAddress.slice(
         0,
         8
       )}... (original: ${address.slice(0, 8)})`
@@ -88,7 +88,7 @@ export class DbService {
         );
       } else {
         console.log(
-          `❌ No identity found for ${normalizedAddress.slice(0, 8)}...`
+          `✗ No identity found for ${normalizedAddress.slice(0, 8)}...`
         );
 
         // Debug: show all identities in DB
@@ -101,7 +101,7 @@ export class DbService {
       return result;
     } catch (error) {
       console.error(
-        `❌ Error getting identity for ${normalizedAddress.slice(0, 8)}...:`,
+        `✗ Error getting identity for ${normalizedAddress.slice(0, 8)}...:`,
         error
       );
       return null;
@@ -110,7 +110,7 @@ export class DbService {
 
   deleteIdentity(address: string) {
     const normalizedAddress = this.normalizeAddress(address);
-    console.log(`🗑️ Deleting identity for ${normalizedAddress.slice(0, 8)}...`);
+    console.log(`Deleting identity for ${normalizedAddress.slice(0, 8)}...`);
     return this.db.identity.delete(normalizedAddress);
   }
 
@@ -172,12 +172,12 @@ export class DbService {
         BigInt(message.nonce)
       )
     ) {
-      console.debug(`💬 Message ${message.dedupKey} already processed`);
+      console.debug(`Message ${message.dedupKey} already processed`);
       return false;
     }
 
     if (await this.db.messages.get(message.id)) {
-      console.debug(`💬 Message ${message.id} already in DB`);
+      console.debug(`Message ${message.id} already in DB`);
       return false;
     }
 
@@ -210,7 +210,7 @@ export class DbService {
     }
 
     console.log(
-      `💬 Saving new message from ${normalizedMessage.sender.slice(
+      `Saving new message from ${normalizedMessage.sender.slice(
         0,
         8
       )}... for owner ${normalizedMessage.ownerAddress.slice(0, 8)}...`
@@ -219,16 +219,91 @@ export class DbService {
     return true;
   }
 
-  async updateMessage(messageId: string, updates: Partial<Message>): Promise<boolean> {
-  try {
-    const result = await this.db.messages.update(messageId, updates);
-    console.log(`📝 Updated message ${messageId.slice(0, 8)}... with:`, updates);
-    return result > 0;
-  } catch (error) {
-    console.error(`❌ Failed to update message ${messageId.slice(0, 8)}...:`, error);
-    return false;
+  async updateMessage(
+    messageId: string,
+    updates: Partial<Message>
+  ): Promise<boolean> {
+    try {
+      // If we're updating the ID, we need to handle it specially
+      if (updates.id && updates.id !== messageId) {
+        const oldMessage = await this.getMessage(messageId);
+        if (oldMessage) {
+          const newMessage = { ...oldMessage, ...updates };
+          await this.deleteMessage(messageId);
+          await this.saveMessage(newMessage);
+          console.log(
+            `Replaced message ${messageId.slice(
+              0,
+              8
+            )}... with new ID ${updates.id?.slice(0, 8)}...`
+          );
+          return true;
+        }
+        return false;
+      }
+
+      const result = await this.db.messages.update(messageId, updates);
+      console.log(
+        `Updated message ${messageId.slice(0, 8)}... with:`,
+        updates
+      );
+      return result > 0;
+    } catch (error) {
+      console.error(
+        `✗ Failed to update message ${messageId.slice(0, 8)}...:`,
+        error
+      );
+      return false;
+    }
   }
+
+async findPendingMessage(
+  sender: string,
+  topic: string,
+  nonce: number,
+  owner: string
+): Promise<Message | undefined> {
+  const normalizedSender = this.normalizeAddress(sender);
+  const normalizedOwner = this.normalizeAddress(owner);
+  
+
+  // Try exact match first using compound index
+  const exactMatch = await this.db.messages
+    .where('[ownerAddress+sender+topic+nonce+status]')
+    .equals([normalizedOwner, normalizedSender, topic, nonce, "pending"])
+    .first();
+    
+  if (exactMatch) {
+    console.log(`Found exact match!`, {
+      messageId: exactMatch.id,
+      messageTopic: exactMatch.topic.slice(0, 20) + "...",
+      messageNonce: exactMatch.nonce
+    });
+    return exactMatch;
+  } 
+  
+  // FALLBACK: Find by content and recent timestamp
+  const recentPendingMessages = await this.db.messages
+    .where('[ownerAddress+sender+status]')
+    .equals([normalizedOwner, normalizedSender, "pending"])
+    .reverse()
+    .limit(3)
+    .toArray();
+    
+  if (recentPendingMessages.length > 0) {
+    console.log(`Using fallback matching: found ${recentPendingMessages.length} recent pending messages`);
+    return recentPendingMessages[0]; // Most recent
+  }
+  
+  return undefined;
 }
+
+  async findMessageByDedupKey(dedupKey: string): Promise<Message | undefined> {
+    return this.db.messages
+      .where('dedupKey')
+      .equals(dedupKey)
+      .first();
+  }
 
 
   async updateContactLastMessage(
@@ -254,15 +329,16 @@ export class DbService {
     return this.db.messages.get(id);
   }
 
-  getMessagesByContact(contact: string, ownerAddress: string, limit = 50) {
+  async getMessagesByContact(contact: string, ownerAddress: string, limit = 50) {
     const normalizedContact = this.normalizeAddress(contact);
     const normalizedOwner = this.normalizeAddress(ownerAddress);
+    
     return this.db.messages
-      .where("ownerAddress")
+      .where('ownerAddress')
       .equals(normalizedOwner)
-      .filter(
-        (m) =>
-          m.sender === normalizedContact || m.recipient === normalizedContact
+      .filter(m => 
+        m.sender === normalizedContact || 
+        m.recipient === normalizedContact
       )
       .reverse()
       .limit(limit)
@@ -281,7 +357,7 @@ export class DbService {
   async getAllMessages(ownerAddress: string, limit = 100) {
     const normalizedOwner = this.normalizeAddress(ownerAddress);
     console.log(
-      `💬 Loading messages for owner ${normalizedOwner.slice(0, 8)}...`
+      `Loading messages for owner ${normalizedOwner.slice(0, 8)}...`
     );
     const messages = await this.db.messages
       .where("ownerAddress")
@@ -320,7 +396,7 @@ export class DbService {
       ownerAddress: this.normalizeAddress(h.ownerAddress),
     };
     console.log(
-      `🤝 Saving pending handshake from ${normalizedHandshake.sender.slice(
+      `...Saving pending handshake from ${normalizedHandshake.sender.slice(
         0,
         8
       )}... for owner ${normalizedHandshake.ownerAddress.slice(0, 8)}...`
@@ -335,7 +411,7 @@ export class DbService {
   async getAllPendingHandshakes(ownerAddress: string) {
     const normalizedOwner = this.normalizeAddress(ownerAddress);
     console.log(
-      `🤝 Loading pending handshakes for owner ${normalizedOwner.slice(
+      `...Loading pending handshakes for owner ${normalizedOwner.slice(
         0,
         8
       )}...`
@@ -418,7 +494,7 @@ export class DbService {
 
   async clearUserData(addr: string) {
     const normalizedAddr = this.normalizeAddress(addr);
-    console.log(`🧹 Clearing data for user ${normalizedAddr.slice(0, 8)}...`);
+    console.log(`Clearing data for user ${normalizedAddr.slice(0, 8)}...`);
     await this.db.transaction(
       "rw",
       [
@@ -460,7 +536,7 @@ export class DbService {
 
   /* ---------------------------- BACKUP / IMPORT --------------------------- */
   async exportData() {
-    console.log("📦 Exporting database...");
+    console.log("Exporting database...");
     const payload = {
       identity: await this.db.identity.toArray(),
       contacts: await this.db.contacts.toArray(),
@@ -477,7 +553,7 @@ export class DbService {
   }
 
   async importData(json: string) {
-    console.log("📥 Importing database...");
+    console.log("...Importing database...");
     const data = JSON.parse(json);
 
     await this.db.transaction(
@@ -505,7 +581,7 @@ export class DbService {
   async switchAccount(newAddress: string) {
     const normalizedAddress = this.normalizeAddress(newAddress);
     console.log(
-      `🔄 Switching to account: ${normalizedAddress.slice(
+      `...Switching to account: ${normalizedAddress.slice(
         0,
         8
       )}... (original: ${newAddress.slice(0, 8)})`
@@ -533,7 +609,7 @@ export class DbService {
     ]);
 
     console.log(
-      `📊 Data for ${normalizedAddress.slice(0, 8)}...: ${
+      `Data for ${normalizedAddress.slice(0, 8)}...: ${
         contacts.length
       } contacts, ${messages.length} messages, ${
         handshakes.length
@@ -543,7 +619,7 @@ export class DbService {
 
   /* ------------------------------ CLEANUP --------------------------------- */
   close() {
-    console.log("🔌 Closing database connection...");
+    console.log("Closing database connection...");
     this.db.close();
   }
 }

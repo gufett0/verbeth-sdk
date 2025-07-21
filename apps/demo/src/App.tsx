@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { Send, X } from "lucide-react";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useWalletClient } from 'wagmi';
 import { useRpcProvider } from './rpc.js';
@@ -26,7 +27,8 @@ import {
   LOGCHAIN_SINGLETON_ADDR,
   CONTRACT_CREATION_BLOCK,
   Contact,
-  StoredIdentity
+  StoredIdentity,
+  generateConversationTopic, generateTempMessageId
 } from './types.js';
 
 export default function App() {
@@ -92,7 +94,6 @@ export default function App() {
     setReady(readProvider !== null && isConnected && walletClient !== undefined);
   }, [readProvider, isConnected, walletClient]);
 
-  // ✅ FIXED: Remove debouncing timeout to avoid hook order issues
   useEffect(() => {
     handleInitialization();
   }, [ready, readProvider, walletClient, address]);
@@ -112,7 +113,7 @@ export default function App() {
       }
 
       // Step 1: Initialize contract and signer FIRST
-      addLog(`🔄 Initializing for account: ${address.slice(0, 8)}...`);
+      addLog(`...Initializing for account: ${address.slice(0, 8)}...`);
 
       const ethersProvider = new BrowserProvider(walletClient.transport);
       const ethersSigner = await ethersProvider.getSigner();
@@ -120,7 +121,7 @@ export default function App() {
       // Verify signer matches the current address
       const signerAddress = await ethersSigner.getAddress();
       if (signerAddress.toLowerCase() !== address.toLowerCase()) {
-        addLog(`❌ Signer mismatch: expected ${address.slice(0, 8)}, got ${signerAddress.slice(0, 8)}`);
+        addLog(`✗ Signer mismatch: expected ${address.slice(0, 8)}, got ${signerAddress.slice(0, 8)}`);
         return;
       }
 
@@ -134,7 +135,7 @@ export default function App() {
 
       // Step 2: Handle account change if needed
       if (address !== currentAccount) {
-        addLog(`🔄 Account ${currentAccount ? 'changed' : 'connected'}: ${address.slice(0, 8)}...`);
+        addLog(`Account ${currentAccount ? 'changed' : 'connected'}: ${address.slice(0, 8)}...`);
 
         // Clear current state
         setIdentityKeyPair(null);
@@ -183,23 +184,14 @@ export default function App() {
 
     } catch (error) {
       console.error("Failed to initialize:", error);
-      addLog(`❌ Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      addLog(`✗ Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }, [ready, readProvider, walletClient, address, currentAccount, addLog]);
-
-  // ✅ FIXED: Generate consistent topic for a contact conversation
-  const generateConversationTopic = useCallback((contactAddress: string): string => {
-    if (!address) return '';
-    
-    // Sort addresses to ensure consistent topic regardless of who initiates
-    const addresses = [address.toLowerCase(), contactAddress.toLowerCase()].sort();
-    return keccak256(toUtf8Bytes(`chat:${addresses[0]}:${addresses[1]}`));
-  }, [address]);
 
   // Send handshake
   const sendHandshake = async () => {
     if (!executor || !address || !recipientAddress || !message || !identityKeyPair || !derivationProof || !signer) {
-      addLog("❌ Missing required data for handshake");
+      addLog("✗ Missing required data for handshake");
       return;
     }
 
@@ -230,11 +222,11 @@ export default function App() {
       // Save to database
       await updateContact(newContact);
 
-      addLog(`📤 Handshake sent to ${recipientAddress.slice(0, 8)}...: "${message}" (tx: ${tx.hash})`);
+      addLog(`Handshake sent to ${recipientAddress.slice(0, 8)}...: "${message}" (tx: ${tx.hash})`);
       setMessage("");
     } catch (error) {
       console.error("Failed to send handshake:", error);
-      addLog(`❌ Failed to send handshake: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      addLog(`✗ Failed to send handshake: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -243,7 +235,7 @@ export default function App() {
   // Accept handshake
   const acceptHandshake = async (handshake: any, responseMessage: string) => {
     if (!executor || !address || !identityKeyPair || !derivationProof || !signer) {
-      addLog("❌ Missing required data for handshake response");
+      addLog("✗ Missing required data for handshake response");
       return;
     }
 
@@ -275,30 +267,51 @@ export default function App() {
       addLog(`✅ Handshake accepted from ${handshake.sender.slice(0, 8)}...: "${responseMessage}"`);
     } catch (error) {
       console.error("Failed to accept handshake:", error);
-      addLog(`❌ Failed to accept handshake: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      addLog(`✗ Failed to accept handshake: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 
   // ✅ FIXED: Send message to established contact with proper topic and nonce tracking
   const sendMessageToContact = async (contact: Contact, messageText: string) => {
     if (!executor || !address || !contact.identityPubKey || !identityKeyPair) {
-      addLog("❌ Contact not established or missing data");
+      addLog("✗ Contact not established or missing data");
       return;
     }
 
     setLoading(true);
     try {
       // ✅ Generate consistent topic for this conversation
-      const topic = generateConversationTopic(contact.address);
+      const topic = generateConversationTopic(address, contact.address);
       const timestamp = Math.floor(Date.now() / 1000);
-
-      // ✅ Get the real nonce that will be used on-chain
-      const nonce = getNextNonce(address, topic);
-
       const identityAsSigningKey = {
         publicKey: identityKeyPair.signingPublicKey,
         secretKey: identityKeyPair.signingSecretKey
       };
+
+      const expectedNonce = Number(getNextNonce(address, topic)) + 1; // +1 to match SDK logic (because SDK will call getNextNonce before sending)
+
+      // Create and save the pending message BEFORE sending
+      const pendingMessage = {
+        id: generateTempMessageId(),
+        topic,
+        sender: address,
+        recipient: contact.address,
+        ciphertext: '', // Will be filled when confirmed
+        timestamp: timestamp * 1000,
+        blockTimestamp: Date.now(),
+        blockNumber: 0, // Will be updated when confirmed
+        direction: 'outgoing' as const,
+        decrypted: messageText,
+        read: true,
+        nonce: expectedNonce,
+        dedupKey: `${address}:${topic}:${expectedNonce}`,
+        type: 'text' as const,
+        ownerAddress: address,
+        status: 'pending' as const
+      };
+
+      // Save to database immediately with pending status
+      await addMessage(pendingMessage);
 
       // Send the actual transaction
       await sendEncryptedMessage({
@@ -311,28 +324,6 @@ export default function App() {
         timestamp
       });
 
-      // ✅ Create the outgoing message record with correct data
-      const newMessage = {
-        id: `${Date.now()}-${Math.random()}`,
-        topic,
-        sender: address,
-        recipient: contact.address,
-        ciphertext: '', // Will be filled when we receive the actual tx
-        timestamp: timestamp * 1000, // Convert to milliseconds
-        blockTimestamp: Date.now(),
-        blockNumber: 0, // Will be updated when confirmed
-        direction: 'outgoing' as const,
-        decrypted: messageText,
-        read: true,
-        nonce: Number(nonce),
-        dedupKey: `${address}:${topic}:${nonce}`,
-        type: 'text' as const,
-        ownerAddress: address
-      };
-
-      // Save to database
-      await addMessage(newMessage);
-
       // ✅ Update contact's lastMessage and lastTimestamp
       const updatedContact: Contact = {
         ...contact,
@@ -341,10 +332,10 @@ export default function App() {
       };
       await updateContact(updatedContact);
 
-      addLog(`📤 Message sent to ${contact.address.slice(0, 8)}...: "${messageText}"`);
+      addLog(`Message sent to ${contact.address.slice(0, 8)}...: "${messageText}"`);
     } catch (error) {
       console.error("Failed to send message:", error);
-      addLog(`❌ Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      addLog(`✗ Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setLoading(false);
     }
@@ -443,17 +434,17 @@ export default function App() {
                                 input.value = '';
                               }
                             }}
-                            className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-xs"
+                            className="px-2 py-1 bg-green-600 hover:bg-green-700 rounded text-xs flex items-center justify-center"
+                            title="Invia risposta"
                           >
-                            Accept
+                            <Send size={16} className="text-white" />
                           </button>
-                          {/* === REJECT BUTTON === */}
                           <button
                             onClick={() => removePendingHandshake(handshake.id)}
-                            className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
-                            title="Reject handshake"
+                            className="px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs flex items-center justify-center ml-2"
+                            title="Rifiuta handshake"
                           >
-                            Reject
+                            <X size={16} className="text-white" />
                           </button>
                         </div>
                       </div>
@@ -538,7 +529,7 @@ export default function App() {
                   <div className="flex-1 overflow-y-auto space-y-2 mb-4">
                     {messages
                       .filter(m => {
-                        const conversationTopic = generateConversationTopic(selectedContact.address);
+                        const conversationTopic = generateConversationTopic(address as string, selectedContact.address);
                         return (
                           m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
                           (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||
@@ -562,15 +553,17 @@ export default function App() {
                               {new Date(msg.timestamp).toLocaleTimeString()}
                             </span>
                             {msg.direction === 'outgoing' && (
-                              <span className="text-xs">
-                                {msg.blockNumber > 0 ? '✓✓' : '✓'}
+                              <span className="text-xs" title={`Status: ${msg.status}`}>
+                                {msg.status === 'confirmed' ? '✓✓' :
+                                  msg.status === 'failed' ? '✗' :
+                                    msg.status === 'pending' ? '✓' : '?'}
                               </span>
                             )}
                           </div>
                         </div>
                       ))}
                     {messages.filter(m => {
-                      const conversationTopic = generateConversationTopic(selectedContact.address);
+                      const conversationTopic = generateConversationTopic(address as string, selectedContact.address);
                       return (
                         m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
                         (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||

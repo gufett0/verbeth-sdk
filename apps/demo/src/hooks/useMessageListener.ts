@@ -16,13 +16,12 @@ import {
   ScanProgress,
   ScanChunk,
   ProcessedEvent,
-  MessageListenerResult
+  MessageListenerResult,
 } from "../types.js";
 
 interface UseMessageListenerProps {
   readProvider: any;
   address: string | undefined;
-  // ❌ Removed contacts prop - will load from DB directly
   onLog: (message: string) => void;
   onEventsProcessed: (events: ProcessedEvent[]) => void;
 }
@@ -31,16 +30,17 @@ export const useMessageListener = ({
   readProvider,
   address,
   onLog,
-  onEventsProcessed
+  onEventsProcessed,
 }: UseMessageListenerProps): MessageListenerResult => {
-  
   // State
   const [isInitialLoading, setIsInitialLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [canLoadMore, setCanLoadMore] = useState(true);
   const [syncProgress, setSyncProgress] = useState<ScanProgress | null>(null);
   const [lastKnownBlock, setLastKnownBlock] = useState<number | null>(null);
-  const [oldestScannedBlock, setOldestScannedBlock] = useState<number | null>(null);
+  const [oldestScannedBlock, setOldestScannedBlock] = useState<number | null>(
+    null
+  );
 
   // Refs
   const processedLogs = useRef(new Set<string>());
@@ -51,13 +51,13 @@ export const useMessageListener = ({
     return keccak256(toUtf8Bytes(`contact:${recipientAddr.toLowerCase()}`));
   };
 
-  // ✅ NEW: Load contacts directly from database when needed
+  // Load contacts directly from database when needed
   const getCurrentContacts = useCallback(async (): Promise<Contact[]> => {
     if (!address) return [];
     try {
       return await dbService.getAllContacts(address);
     } catch (error) {
-      onLog(`❌ Failed to load contacts: ${error}`);
+      onLog(`✗ Failed to load contacts: ${error}`);
       return [];
     }
   }, [address, onLog]);
@@ -82,7 +82,12 @@ export const useMessageListener = ({
         if (toBlock - fromBlock > MAX_RANGE_PROVIDER) {
           const mid = fromBlock + Math.floor((toBlock - fromBlock) / 2);
           const firstHalf = await safeGetLogs(filter, fromBlock, mid, retries);
-          const secondHalf = await safeGetLogs(filter, mid + 1, toBlock, retries);
+          const secondHalf = await safeGetLogs(
+            filter,
+            mid + 1,
+            toBlock,
+            retries
+          );
           return [...firstHalf, ...secondHalf];
         }
 
@@ -102,7 +107,7 @@ export const useMessageListener = ({
         ) {
           if (attempt < retries) {
             onLog(
-              `⏳ RPC error, retrying in ${delay}ms... (attempt ${attempt}/${retries})`
+              `! RPC error, retrying in ${delay}ms... (attempt ${attempt}/${retries})`
             );
             await new Promise((resolve) => setTimeout(resolve, delay));
             delay *= 1.5;
@@ -114,16 +119,20 @@ export const useMessageListener = ({
           error.message?.includes("exceed") ||
           error.message?.includes("range")
         ) {
-          onLog(`❌ Block range error, skipping range ${fromBlock}-${toBlock}`);
+          onLog(`✗ Block range error, skipping range ${fromBlock}-${toBlock}`);
           return [];
         }
 
-        onLog(`❌ RPC error on range ${fromBlock}-${toBlock}: ${error.message}`);
+        onLog(
+          `✗ RPC error on range ${fromBlock}-${toBlock}: ${error.message}`
+        );
         return [];
       }
     }
 
-    onLog(`❌ Failed after ${retries} retries for range ${fromBlock}-${toBlock}`);
+    onLog(
+      `✗ Failed after ${retries} retries for range ${fromBlock}-${toBlock}`
+    );
     return [];
   };
 
@@ -148,7 +157,9 @@ export const useMessageListener = ({
     return ranges;
   };
 
-  const batchScanRanges = async (ranges: [number, number][]): Promise<ProcessedEvent[]> => {
+  const batchScanRanges = async (
+    ranges: [number, number][]
+  ): Promise<ProcessedEvent[]> => {
     if (ranges.length > 1) {
       setSyncProgress({ current: 0, total: ranges.length });
     }
@@ -169,7 +180,7 @@ export const useMessageListener = ({
           await new Promise((resolve) => setTimeout(resolve, 200));
         }
       } catch (error) {
-        onLog(`❌ Failed to scan range ${start}-${end}: ${error}`);
+        onLog(`✗ Failed to scan range ${start}-${end}: ${error}`);
       }
     }
 
@@ -196,8 +207,12 @@ export const useMessageListener = ({
         address: LOGCHAIN_SINGLETON_ADDR,
         topics: [EVENT_SIGNATURES.Handshake, userRecipientHash],
       };
-      const handshakeLogs = await safeGetLogs(handshakeFilter, fromBlock, toBlock);
-      
+      const handshakeLogs = await safeGetLogs(
+        handshakeFilter,
+        fromBlock,
+        toBlock
+      );
+
       for (const log of handshakeLogs) {
         const logKey = `${log.transactionHash}-${log.logIndex}`;
         if (!processedLogs.current.has(logKey)) {
@@ -207,7 +222,7 @@ export const useMessageListener = ({
             eventType: "handshake",
             rawLog: log,
             blockNumber: log.blockNumber,
-            timestamp: Date.now()
+            timestamp: Date.now(),
           });
         }
       }
@@ -228,18 +243,24 @@ export const useMessageListener = ({
           address: LOGCHAIN_SINGLETON_ADDR,
           topics: [EVENT_SIGNATURES.HandshakeResponse],
         };
-        const responseLogs = await safeGetLogs(responseFilter, fromBlock, toBlock);
+        const responseLogs = await safeGetLogs(
+          responseFilter,
+          fromBlock,
+          toBlock
+        );
 
-        onLog(`🔍 Found ${responseLogs.length} total handshake responses in blocks ${fromBlock}-${toBlock}`);
+        onLog(
+          `🔍 Found ${responseLogs.length} total handshake responses in blocks ${fromBlock}-${toBlock}`
+        );
         responseLogs.forEach((log, i) => {
-          onLog(`🔍 Response[${i}] inResponseTo: ${log.topics[1]}`);
+          onLog(`Response[${i}] inResponseTo: ${log.topics[1]}`);
         });
 
         const myResponses = responseLogs.filter((log) =>
           pendingTxHashes.includes(log.topics[1])
         );
 
-        onLog(`🔍 Filtered to ${myResponses.length} responses for me`);
+        onLog(`Filtered to ${myResponses.length} responses for me`);
 
         for (const log of myResponses) {
           const logKey = `${log.transactionHash}-${log.logIndex}`;
@@ -250,25 +271,39 @@ export const useMessageListener = ({
               eventType: "handshake_response",
               rawLog: log,
               blockNumber: log.blockNumber,
-              timestamp: Date.now()
+              timestamp: Date.now(),
             });
           }
         }
       }
 
       // 3. Messages from established contacts
-      const establishedContacts = contacts.filter((c) => c.status === "established");
+      const establishedContacts = contacts.filter(
+        (c) => c.status === "established"
+      );
       if (establishedContacts.length > 0) {
         const senderTopics = establishedContacts.map(
-          (c) => "0x" + c.address.replace("0x", "").toLowerCase().padStart(64, "0")
+          (c) =>
+            "0x" + c.address.replace("0x", "").toLowerCase().padStart(64, "0")
         );
+
+        // 👉 aggiungi il tuo indirizzo così il listener vede i tuoi messaggi in uscita
+        if (address) {
+          const myTopic =
+            "0x" + address.replace("0x", "").toLowerCase().padStart(64, "0");
+          if (!senderTopics.includes(myTopic)) senderTopics.push(myTopic);
+        }
 
         const messageFilter = {
           address: LOGCHAIN_SINGLETON_ADDR,
           topics: [EVENT_SIGNATURES.MessageSent, senderTopics],
         };
-        const messageLogs = await safeGetLogs(messageFilter, fromBlock, toBlock);
-        
+        const messageLogs = await safeGetLogs(
+          messageFilter,
+          fromBlock,
+          toBlock
+        );
+
         for (const log of messageLogs) {
           const logKey = `${log.transactionHash}-${log.logIndex}`;
           if (!processedLogs.current.has(logKey)) {
@@ -278,13 +313,13 @@ export const useMessageListener = ({
               eventType: "message",
               rawLog: log,
               blockNumber: log.blockNumber,
-              timestamp: Date.now()
+              timestamp: Date.now(),
             });
           }
         }
       }
     } catch (error) {
-      onLog(`⚠️ Error scanning block range ${fromBlock}-${toBlock}: ${error}`);
+      onLog(`Error scanning block range ${fromBlock}-${toBlock}: ${error}`);
     }
 
     return allEvents;
@@ -298,20 +333,22 @@ export const useMessageListener = ({
     const initialScanComplete = await dbService.getInitialScanComplete(address);
     if (initialScanComplete) {
       onLog(`✅ Initial scan already completed for ${address.slice(0, 8)}...`);
-      
+
       // Load from database
       const savedLastBlock = await dbService.getLastKnownBlock();
       const savedOldestBlock = await dbService.getOldestScannedBlock();
-      
+
       if (savedLastBlock) setLastKnownBlock(savedLastBlock);
       if (savedOldestBlock) setOldestScannedBlock(savedOldestBlock);
-      
-      setCanLoadMore(savedOldestBlock ? savedOldestBlock > CONTRACT_CREATION_BLOCK : true);
+
+      setCanLoadMore(
+        savedOldestBlock ? savedOldestBlock > CONTRACT_CREATION_BLOCK : true
+      );
       return;
     }
 
     setIsInitialLoading(true);
-    onLog(`🚀 Starting initial scan of last ${INITIAL_SCAN_BLOCKS} blocks...`);
+    onLog(`...Starting initial scan of last ${INITIAL_SCAN_BLOCKS} blocks...`);
 
     try {
       const currentBlock = await readProvider.getBlockNumber();
@@ -331,7 +368,7 @@ export const useMessageListener = ({
           fromBlock: startBlock,
           toBlock: currentBlock,
           loaded: true,
-          events: events.map(e => e.rawLog),
+          events: events.map((e) => e.rawLog),
         },
       ];
 
@@ -348,11 +385,18 @@ export const useMessageListener = ({
         `✅ Initial scan complete: ${events.length} events found in blocks ${startBlock}-${currentBlock}`
       );
     } catch (error) {
-      onLog(`❌ Initial scan failed: ${error}`);
+      onLog(`✗ Initial scan failed: ${error}`);
     } finally {
       setIsInitialLoading(false);
     }
-  }, [readProvider, address, isInitialLoading, onLog, onEventsProcessed, getCurrentContacts]);
+  }, [
+    readProvider,
+    address,
+    isInitialLoading,
+    onLog,
+    onEventsProcessed,
+    getCurrentContacts,
+  ]);
 
   // Lazy load more history (unchanged)
   const loadMoreHistory = useCallback(async () => {
@@ -367,7 +411,7 @@ export const useMessageListener = ({
     }
 
     setIsLoadingMore(true);
-    onLog(`📂 Loading more history...`);
+    onLog(`...Loading more history...`);
 
     try {
       const endBlock = oldestScannedBlock - 1;
@@ -400,7 +444,7 @@ export const useMessageListener = ({
       const ranges = await findEventRanges(safeStartBlock, safeEndBlock);
 
       if (ranges.length === 0) {
-        onLog(`📄 No more events found before block ${safeEndBlock}`);
+        onLog(`No more events found before block ${safeEndBlock}`);
         setCanLoadMore(false);
         setIsLoadingMore(false);
         return;
@@ -416,7 +460,7 @@ export const useMessageListener = ({
         fromBlock: safeStartBlock,
         toBlock: safeEndBlock,
         loaded: true,
-        events: events.map(e => e.rawLog),
+        events: events.map((e) => e.rawLog),
       });
 
       // Update state and database
@@ -428,11 +472,19 @@ export const useMessageListener = ({
         `✅ Loaded ${events.length} more events from blocks ${safeStartBlock}-${safeEndBlock}`
       );
     } catch (error) {
-      onLog(`❌ Failed to load more history: ${error}`);
+      onLog(`✗ Failed to load more history: ${error}`);
     } finally {
       setIsLoadingMore(false);
     }
-  }, [readProvider, address, isLoadingMore, canLoadMore, oldestScannedBlock, onLog, onEventsProcessed]);
+  }, [
+    readProvider,
+    address,
+    isLoadingMore,
+    canLoadMore,
+    oldestScannedBlock,
+    onLog,
+    onEventsProcessed,
+  ]);
 
   // Real-time scanning for new blocks (unchanged)
   useEffect(() => {
@@ -450,7 +502,7 @@ export const useMessageListener = ({
           if (events.length > 0) {
             onEventsProcessed(events);
             onLog(
-              `🔄 Found ${events.length} new events in blocks ${startScanBlock}-${maxSafeBlock}`
+              `Found ${events.length} new events in blocks ${startScanBlock}-${maxSafeBlock}`
             );
           }
 

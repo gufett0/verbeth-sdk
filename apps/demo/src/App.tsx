@@ -16,7 +16,8 @@ import {
   ExecutorFactory,
   deriveIdentityKeyPairWithProof,
   IdentityKeyPair,
-  DerivationProof
+  DerivationProof,
+  getNextNonce
 } from '@verbeth/sdk';
 import { useMessageListener } from './hooks/useMessageListener.js';
 import { useMessageProcessor } from './hooks/useMessageProcessor.js';
@@ -186,6 +187,15 @@ export default function App() {
     }
   }, [ready, readProvider, walletClient, address, currentAccount, addLog]);
 
+  // ✅ FIXED: Generate consistent topic for a contact conversation
+  const generateConversationTopic = useCallback((contactAddress: string): string => {
+    if (!address) return '';
+    
+    // Sort addresses to ensure consistent topic regardless of who initiates
+    const addresses = [address.toLowerCase(), contactAddress.toLowerCase()].sort();
+    return keccak256(toUtf8Bytes(`chat:${addresses[0]}:${addresses[1]}`));
+  }, [address]);
+
   // Send handshake
   const sendHandshake = async () => {
     if (!executor || !address || !recipientAddress || !message || !identityKeyPair || !derivationProof || !signer) {
@@ -269,29 +279,28 @@ export default function App() {
     }
   };
 
-  // Send message to established contact
+  // ✅ FIXED: Send message to established contact with proper topic and nonce tracking
   const sendMessageToContact = async (contact: Contact, messageText: string) => {
-    if (!executor || !address || !contact.identityPubKey) {
+    if (!executor || !address || !contact.identityPubKey || !identityKeyPair) {
       addLog("❌ Contact not established or missing data");
       return;
     }
 
     setLoading(true);
     try {
-      const topic = keccak256(toUtf8Bytes(`chat:${contact.address}`));
+      // ✅ Generate consistent topic for this conversation
+      const topic = generateConversationTopic(contact.address);
       const timestamp = Math.floor(Date.now() / 1000);
 
-      if (!identityKeyPair) {
-        addLog("❌ Identity key pair is missing");
-        setLoading(false);
-        return;
-      }
+      // ✅ Get the real nonce that will be used on-chain
+      const nonce = getNextNonce(address, topic);
 
       const identityAsSigningKey = {
         publicKey: identityKeyPair.signingPublicKey,
         secretKey: identityKeyPair.signingSecretKey
       };
 
+      // Send the actual transaction
       await sendEncryptedMessage({
         executor,
         topic,
@@ -302,25 +311,35 @@ export default function App() {
         timestamp
       });
 
+      // ✅ Create the outgoing message record with correct data
       const newMessage = {
         id: `${Date.now()}-${Math.random()}`,
         topic,
         sender: address,
         recipient: contact.address,
-        ciphertext: '', // Will be filled by actual encryption
-        timestamp: Date.now(),
+        ciphertext: '', // Will be filled when we receive the actual tx
+        timestamp: timestamp * 1000, // Convert to milliseconds
         blockTimestamp: Date.now(),
         blockNumber: 0, // Will be updated when confirmed
         direction: 'outgoing' as const,
         decrypted: messageText,
         read: true,
-        nonce: 0, // Will be updated
-        dedupKey: `${address}:${topic}:${Date.now()}`,
+        nonce: Number(nonce),
+        dedupKey: `${address}:${topic}:${nonce}`,
         type: 'text' as const,
         ownerAddress: address
       };
 
-      addMessage(newMessage);
+      // Save to database
+      await addMessage(newMessage);
+
+      // ✅ Update contact's lastMessage and lastTimestamp
+      const updatedContact: Contact = {
+        ...contact,
+        lastMessage: messageText,
+        lastTimestamp: Date.now()
+      };
+      await updateContact(updatedContact);
 
       addLog(`📤 Message sent to ${contact.address.slice(0, 8)}...: "${messageText}"`);
     } catch (error) {
@@ -518,10 +537,15 @@ export default function App() {
                   {/* Messages */}
                   <div className="flex-1 overflow-y-auto space-y-2 mb-4">
                     {messages
-                      .filter(m =>
-                        m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
-                        (m.direction === 'outgoing' && selectedContact)
-                      )
+                      .filter(m => {
+                        const conversationTopic = generateConversationTopic(selectedContact.address);
+                        return (
+                          m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
+                          (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||
+                          m.topic === conversationTopic
+                        );
+                      })
+                      .sort((a, b) => a.timestamp - b.timestamp) // Sort by timestamp
                       .map((msg) => (
                         <div
                           key={msg.id}
@@ -533,15 +557,26 @@ export default function App() {
                             }`}
                         >
                           <p className="text-sm">{msg.decrypted || msg.ciphertext}</p>
-                          <span className="text-xs text-gray-300">
-                            {new Date(msg.timestamp).toLocaleTimeString()}
-                          </span>
+                          <div className="flex justify-between items-center mt-1">
+                            <span className="text-xs text-gray-300">
+                              {new Date(msg.timestamp).toLocaleTimeString()}
+                            </span>
+                            {msg.direction === 'outgoing' && (
+                              <span className="text-xs">
+                                {msg.blockNumber > 0 ? '✓✓' : '✓'}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       ))}
-                    {messages.filter(m =>
-                      m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
-                      (m.direction === 'outgoing' && selectedContact)
-                    ).length === 0 && (
+                    {messages.filter(m => {
+                      const conversationTopic = generateConversationTopic(selectedContact.address);
+                      return (
+                        m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
+                        (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||
+                        m.topic === conversationTopic
+                      );
+                    }).length === 0 && (
                         <p className="text-gray-400 text-sm text-center py-8">
                           No messages yet. {selectedContact.status === 'established' ? 'Start the conversation!' : 'Complete the handshake first.'}
                         </p>

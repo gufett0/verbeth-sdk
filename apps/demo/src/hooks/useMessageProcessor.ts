@@ -239,7 +239,7 @@ export const useMessageProcessor = ({
         status: "established" as ContactStatus,
         identityPubKey: extractedKeys.identityPubKey,
         signingPubKey: extractedKeys.signingPubKey,
-        lastMessage: decryptedResponse.note,
+        lastMessage: decryptedResponse.note || decryptedResponse.note,
         lastTimestamp: Date.now(),
       };
 
@@ -263,7 +263,7 @@ export const useMessageProcessor = ({
     }
   }, [address, readProvider, onLog]);
 
-  // ✅ FIXED: Process message log - load contacts from DB
+  // ✅ FIXED: Process message log - load contacts from DB and update lastMessage
   const processMessageLog = useCallback(async (
     event: ProcessedEvent
   ): Promise<void> => {
@@ -276,6 +276,48 @@ export const useMessageProcessor = ({
       const [ciphertextBytes, timestamp, topic, nonce] = decoded;
 
       const sender = "0x" + log.topics[1].slice(-40);
+      const ciphertextJson = new TextDecoder().decode(hexToUint8Array(ciphertextBytes));
+      const isOurMessage = sender.toLowerCase() === address.toLowerCase();
+
+      if (isOurMessage) {
+        // This is our own message appearing on-chain, update the outgoing message status
+        onLog(`🔄 Confirming our outgoing message: topic=${topic.slice(0, 10)}..., nonce=${Number(nonce)}`);
+        
+        // Find the corresponding outgoing message in our state
+        const existingOutgoingMessage = messages.find(m => 
+          m.direction === 'outgoing' && 
+          m.topic === topic && 
+          m.nonce === Number(nonce) &&
+          m.sender.toLowerCase() === address.toLowerCase() &&
+          m.blockNumber === 0 // Only update messages that haven't been confirmed yet
+        );
+
+        if (existingOutgoingMessage) {
+          // ✅ Update the outgoing message with on-chain confirmation
+          const updatedMessage: Message = {
+            ...existingOutgoingMessage,
+            blockNumber: log.blockNumber,
+            blockTimestamp: Date.now(),
+            ciphertext: ciphertextJson, // Now we have the real ciphertext
+            id: generateMessageId(log.transactionHash, log.logIndex, sender, Number(nonce)) // Update with real tx data
+          };
+          
+          // Update in database
+          await dbService.updateMessage(existingOutgoingMessage.id, updatedMessage);
+          
+          // Update state
+          setMessages(prev => prev.map(m => 
+            m.id === existingOutgoingMessage.id ? updatedMessage : m
+          ));
+          
+          onLog(`✅ Outgoing message confirmed on-chain: "${existingOutgoingMessage.decrypted?.slice(0, 30)}..."`);
+        } else {
+          onLog(`⚠️ Couldn't find matching outgoing message for confirmation`);
+        }
+        
+        return; // Don't process as incoming message since it's our own
+      }
+
       
       // ✅ FIXED: Load fresh contacts from database instead of using stale parameter
       const currentContacts = await dbService.getAllContacts(address);
@@ -289,7 +331,6 @@ export const useMessageProcessor = ({
         return;
       }
 
-      const ciphertextJson = new TextDecoder().decode(hexToUint8Array(ciphertextBytes));
       const decryptedMessage = decryptMessage(
         ciphertextJson,
         identityKeyPair.secretKey,
@@ -330,6 +371,22 @@ export const useMessageProcessor = ({
           if (existing) return prev;
           return [...prev, message];
         });
+
+        // ✅ FIXED: Update contact's lastMessage and lastTimestamp when receiving a message
+        const updatedContact: Contact = {
+          ...contact,
+          lastMessage: decryptedMessage,
+          lastTimestamp: Date.now()
+        };
+
+        await dbService.saveContact(updatedContact);
+        
+        // Update contacts state
+        setContacts(prev => 
+          prev.map(c => 
+            c.address.toLowerCase() === sender.toLowerCase() ? updatedContact : c
+          )
+        );
 
         onLog(`💬 Message from ${sender.slice(0, 8)}...: "${decryptedMessage}"`);
       }
@@ -373,14 +430,14 @@ export const useMessageProcessor = ({
   }, []);
 
   const updateContact = useCallback(async (contact: Contact) => {
-  if (!address) return;
-  const contactWithOwner = { ...contact, ownerAddress: address };
-  await dbService.saveContact(contactWithOwner);
+    if (!address) return;
+    const contactWithOwner = { ...contact, ownerAddress: address };
+    await dbService.saveContact(contactWithOwner);
 
-  // Always reload all contacts from the DB after update to ensure state is correct
-  const allContacts = await dbService.getAllContacts(address);
-  setContacts(allContacts);
-}, [address]);
+    // Always reload all contacts from the DB after update to ensure state is correct
+    const allContacts = await dbService.getAllContacts(address);
+    setContacts(allContacts);
+  }, [address]);
 
   // Clear state when address changes
   useEffect(() => {

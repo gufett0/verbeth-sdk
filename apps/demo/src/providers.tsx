@@ -2,7 +2,8 @@ import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WagmiProvider } from 'wagmi';
 import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
-import { config } from '../config';
+import { config } from '../config.js';
+
 
 // Custom dark theme for minimalist black and white design
 const customTheme = darkTheme({
@@ -22,6 +23,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <RainbowKitProvider
           theme={customTheme}
           modalSize="compact"
+          initialChain={8453} 
         > 
           {children}
         </RainbowKitProvider>

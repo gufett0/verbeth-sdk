@@ -497,7 +497,7 @@ export class ExecutorFactory {
     baseAccountProvider: any,
     logChainAddress: string,
     chainId = 8453, // Base mainnet by default
-    paymasterServiceUrl : string
+    paymasterServiceUrl? : string
   ): IExecutor {
     return new BaseSmartAccountExecutor(baseAccountProvider, logChainAddress, chainId, paymasterServiceUrl);
   }

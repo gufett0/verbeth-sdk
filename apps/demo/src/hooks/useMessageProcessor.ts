@@ -309,7 +309,7 @@ export const useMessageProcessor = ({
 
         onLog(
           `🤝 Handshake completed with ${responder.slice(0, 8)}... ${
-            isVerified ? "✅" : "⚠️"
+            isVerified ? "Verified ✅" : "Unverified! ⚠️"
           }: "${decryptedResponse.note}"`
         );
       } catch (error) {

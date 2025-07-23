@@ -10,6 +10,8 @@ import { sha256 } from '@noble/hashes/sha256';
 import { hkdf } from '@noble/hashes/hkdf';
 import nacl from 'tweetnacl';
 import { DerivationProof } from './types.js';
+import { keccak256, toUtf8Bytes, hexlify } from "ethers";
+import { AbiCoder } from "ethers";
 
 /**
  * Generalized EIP-1271 signature verification
@@ -41,37 +43,52 @@ export async function verifyEIP1271Signature(
  * Returns true if the address has deployed code AND implements isValidSignature function
  */
 export async function isSmartContract(
-  address: string, 
+  address: string,
   provider: JsonRpcProvider
 ): Promise<boolean> {
   try {
-    // // skip ens resolution
-    // if (!address.startsWith('0x') || address.length !== 42) {
-    //   return false;
-    // }
-    
     const code = await provider.getCode(address);
-    
     if (code === "0x") {
       return false;
     }
-    
+
+    // mock data
+    const authenticatorData = "0xdeadbeef";
+    const clientDataJSON = "0xbeefdead";
+    const rawSignature = "0x" + "11".repeat(64);
+
+    const abi = AbiCoder.defaultAbiCoder();
+    const webAuthnAuth = abi.encode(
+      ["bytes", "bytes", "bytes"],
+      [authenticatorData, clientDataJSON, rawSignature]
+    );
+    const ownerIndex = 0;
+    const signatureWrapper = abi.encode(
+      ["uint256", "bytes"],
+      [ownerIndex, webAuthnAuth]
+    );
+    const hash = keccak256(toUtf8Bytes("test message"));
+
+    const contract = new Contract(
+      address,
+      ["function isValidSignature(bytes32, bytes) external view returns (bytes4)"],
+      provider
+    );
+
     try {
-      const contract = new Contract(
-        address,
-        ["function isValidSignature(bytes32, bytes) external view returns (bytes4)"],
-        provider
-      );
-      
-      await contract.isValidSignature.staticCall(
-        "0x0000000000000000000000000000000000000000000000000000000000000000",
-        "0x"
-      );
-      
-      return true;
-    } catch (err) {
-      // the contract doesn't support EIP-1271
-      return false;
+      const result = await contract.isValidSignature.staticCall(hash, signatureWrapper);
+      return result === "0x1626ba7e";
+    } catch (err: any) {
+      // if error without data then isValidSignature exists
+      if (
+        err.code === "CALL_EXCEPTION" &&
+        (!err.data || err.data === "0x" || err.data === null)
+      ) {
+        return true;
+      } else {
+        console.error("The contract doesn't support EIP-1271: ", err);
+        return false;
+      }
     }
   } catch (err) {
     console.error("Error checking if address is smart contract:", err);

@@ -30,9 +30,18 @@ export function InitialForm({
     <div className="flex items-center justify-center min-h-[60vh]">
       <div className="border border-gray-800 rounded-lg p-8 w-full max-w-md">
         <div className="flex items-center justify-between mb-6">
-          <h2 className="text-2xl font-semibold">
-            {contactsLength === 0 ? "Start Your First Conversation" : "New Conversation"}
-          </h2>
+          <div className="w-full">
+            <h2 className="text-2xl font-semibold text-center">
+              {contactsLength === 0 ? "Start Your First Chat" : "New Chat"}
+            </h2>
+            {contactsLength === 0 && (
+              <div className="w-full text-center mt-2">
+                <span className="text-sm text-gray-400">
+                  Unstoppable. Private by design.
+                </span>
+              </div>
+            )}
+          </div>
           {contactsLength > 0 && onBackToChats && (
             <button
               onClick={onBackToChats}
@@ -42,6 +51,7 @@ export function InitialForm({
             </button>
           )}
         </div>
+
         <div className="space-y-4">
           <input
             type="text"
@@ -59,7 +69,7 @@ export function InitialForm({
           />
           {shouldShowConnect ? (
             <ConnectButton.Custom>
-              {({ openConnectModal } : any) => (
+              {({ openConnectModal }: any) => (
                 <button
                   onClick={openConnectModal}
                   className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 rounded font-medium"
@@ -74,7 +84,7 @@ export function InitialForm({
               disabled={loading || !recipientAddress.trim() || !message.trim() || !isConnected}
               className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded font-medium"
             >
-              {loading ? "Sending..." : "Send Handshake"}
+              {loading ? "Sending..." : "Send Request"}
             </button>
           )}
         </div>

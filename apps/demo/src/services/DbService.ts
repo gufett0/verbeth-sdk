@@ -25,7 +25,7 @@ export class DbService {
   async saveIdentity(identity: StoredIdentity) {
     const normalizedAddress = this.normalizeAddress(identity.address);
     console.log(
-      `🔑 Saving identity for ${normalizedAddress.slice(
+      `Saving identity for ${normalizedAddress.slice(
         0,
         8
       )}... (original: ${identity.address.slice(0, 8)})`
@@ -47,7 +47,7 @@ export class DbService {
       const verification = await this.db.identity.get(normalizedAddress);
       if (verification) {
         console.log(
-          `✅ Identity verified in DB for ${normalizedAddress.slice(0, 8)}...`
+          `Identity verified in DB for ${normalizedAddress.slice(0, 8)}...`
         );
       } else {
         console.error(
@@ -80,20 +80,10 @@ export class DbService {
     try {
       const result = await this.db.identity.get(normalizedAddress);
       if (result) {
-        console.log(
-          `✅ Found identity for ${normalizedAddress.slice(
-            0,
-            8
-          )}... (derived: ${new Date(result.derivedAt).toLocaleString()})`
-        );
       } else {
-        console.log(
-          `✗ No identity found for ${normalizedAddress.slice(0, 8)}...`
-        );
-
         // Debug: show all identities in DB
         const allIdentities = await this.db.identity.toArray();
-        console.log(`🔍 Available identities in DB: ${allIdentities.length}`);
+        console.log(`Available identities in DB: ${allIdentities.length}`);
         allIdentities.forEach((id) => {
           console.log(`  - ${id.address} (${id.address.slice(0, 8)}...)`);
         });
@@ -367,12 +357,6 @@ async findPendingMessage(
     const sorted = messages
       .sort((a, b) => b.blockTimestamp - a.blockTimestamp)
       .slice(0, limit);
-    console.log(
-      `✅ Found ${sorted.length} messages for owner ${normalizedOwner.slice(
-        0,
-        8
-      )}...`
-    );
     return sorted;
   }
 
@@ -410,28 +394,17 @@ async findPendingMessage(
 
   async getAllPendingHandshakes(ownerAddress: string) {
     const normalizedOwner = this.normalizeAddress(ownerAddress);
-    console.log(
-      `...Loading pending handshakes for owner ${normalizedOwner.slice(
-        0,
-        8
-      )}...`
-    );
     const handshakes = await this.db.pendingHandshakes
       .where("ownerAddress")
       .equals(normalizedOwner)
       .toArray();
 
     const sorted = handshakes.sort((a, b) => b.timestamp - a.timestamp);
-    console.log(
-      `✅ Found ${
-        sorted.length
-      } pending handshakes for owner ${normalizedOwner.slice(0, 8)}...`
-    );
     return sorted;
   }
 
   deletePendingHandshake(id: string) {
-    console.log(`🗑️ Deleting pending handshake ${id.slice(0, 8)}...`);
+    console.log(`Deleting pending handshake ${id.slice(0, 8)}...`);
     return this.db.pendingHandshakes.delete(id);
   }
 

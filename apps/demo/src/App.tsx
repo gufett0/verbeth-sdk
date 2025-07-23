@@ -31,8 +31,6 @@ import {
   generateConversationTopic, generateTempMessageId
 } from './types.js';
 import { InitialForm } from './components/InitialForm.js';
-//import { createBaseAccountSDK } from "@base-org/account";
-
 
 export default function App() {
   const readProvider = useRpcProvider();
@@ -54,18 +52,29 @@ export default function App() {
   const [contract, setContract] = useState<LogChainV1 | null>(null);
   const [signer, setSigner] = useState<any>(null);
   const [isActivityLogOpen, setIsActivityLogOpen] = useState(false);
+  const [activityLogs, setActivityLogs] = useState<string>("");
 
   // Refs for logging
   const logRef = useRef<HTMLTextAreaElement>(null);
   //const sdk = useRef<ReturnType<typeof createBaseAccountSDK>>();
 
   const addLog = useCallback((message: string) => {
-    if (logRef.current) {
-      const timestamp = new Date().toLocaleTimeString();
-      logRef.current.value += `[${timestamp}] ${message}\n`;
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, []);
+    const timestamp = new Date().toLocaleTimeString();
+    const logEntry = `[${timestamp}] ${message}\n`;
+
+    setActivityLogs(prev => {
+      const newLogs = prev + logEntry;
+
+      // Auto-scroll if textarea is available and accordion is open
+      setTimeout(() => {
+        if (logRef.current && isActivityLogOpen) {
+          logRef.current.scrollTop = logRef.current.scrollHeight;
+        }
+      }, 0);
+
+      return newLogs;
+    });
+  }, [isActivityLogOpen]);
 
   const {
     messages,
@@ -105,8 +114,8 @@ export default function App() {
 
   // hide handshake form when we have contacts
   useEffect(() => {
-    setShowHandshakeForm(contacts.length === 0);
-  }, [contacts.length]);
+  setShowHandshakeForm(!ready || contacts.length === 0);
+}, [ready, contacts.length]);
 
   const handleInitialization = useCallback(async () => {
     try {
@@ -150,9 +159,9 @@ export default function App() {
             walletClient.transport,
             LOGCHAIN_SINGLETON_ADDR,
             8453,
-            paymasterUrl 
+            paymasterUrl
           );
-          
+
           if (paymasterUrl) {
             console.log(`Smart Account with gas sponsorship detected: ${address.slice(0, 8)}...`);
           } else {
@@ -281,7 +290,7 @@ export default function App() {
         blockTimestamp: Date.now(),
         blockNumber: 0,
         direction: 'outgoing' as const,
-        decrypted: `Handshake sent: "${message}"`,
+        decrypted: `Request sent: "${message}"`,
         read: true,
         nonce: 0,
         dedupKey: `handshake-${tx.hash}`,
@@ -337,6 +346,30 @@ export default function App() {
 
       // Auto-select the new contact
       setSelectedContact(newContact);
+
+      // Add handshake acceptance message to chat
+      const conversationTopic = generateConversationTopic(address, handshake.sender);
+      const acceptanceMessage = {
+        id: generateTempMessageId(),
+        topic: conversationTopic,
+        sender: address,
+        recipient: handshake.sender,
+        ciphertext: '',
+        timestamp: Date.now(),
+        blockTimestamp: Date.now(),
+        blockNumber: 0,
+        direction: 'outgoing' as const,
+        decrypted: `Request accepted: "${responseMessage}"`,
+        read: true,
+        nonce: 0,
+        dedupKey: `handshake-accepted-${handshake.id}`,
+        type: 'system' as const,
+        ownerAddress: address,
+        status: 'pending' as const
+      };
+
+      await addMessage(acceptanceMessage);
+
 
       addLog(`✅ Handshake accepted from ${handshake.sender.slice(0, 8)}...: "${responseMessage}"`);
     } catch (error) {
@@ -417,11 +450,19 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* Header full width */}
       <div className="w-full border-b border-gray-800 bg-black">
         <div className="flex justify-between items-center px-4 py-4">
-          <h1 className="text-2xl font-bold">Verbeth Chat</h1>
-          <ConnectButton />
+          <div>
+            <h1 className="text-2xl font-bold leading-tight">
+              Verbeth Chat
+            </h1>
+            <div className="text-xs text-gray-400 pl-0.5 mt-1">
+              powered by Base
+            </div>
+          </div>
+          <div className={!isConnected ? "border border-gray-600 rounded-lg p-0.5" : ""}>
+            <ConnectButton />
+          </div>
         </div>
       </div>
 
@@ -590,9 +631,9 @@ export default function App() {
                             key={msg.id}
                             className={`p-2 rounded max-w-xs ${msg.direction === 'outgoing'
                               ? 'bg-blue-600 ml-auto'
-                              : msg.type === 'system'
-                                ? 'bg-gray-700 mx-auto text-center text-xs'
-                                : 'bg-gray-700'
+                              : msg.direction === 'incoming'
+                                ? 'bg-gray-700'
+                                : 'bg-gray-700 mx-auto text-center text-xs'
                               }`}
                           >
                             <p className="text-sm">{msg.decrypted || msg.ciphertext}</p>
@@ -717,28 +758,35 @@ export default function App() {
                 )}
               </div>
 
-              {isActivityLogOpen && (
+              <div
+                className={`overflow-hidden transition-all duration-300 ease-in-out ${isActivityLogOpen ? 'max-h-40 opacity-100' : 'max-h-0 opacity-0'
+                  }`}
+              >
                 <div className="p-4 pt-0">
                   <textarea
                     ref={logRef}
                     readOnly
+                    value={activityLogs}
                     className="w-full h-32 bg-gray-900 border border-gray-700 rounded p-2 text-sm font-mono text-gray-300 resize-none"
                     placeholder="Activity will appear here..."
                   />
                 </div>
-              )}
+              </div>
             </div>
           )}
 
         </div>
 
         {/* Debug Info */}
-        <div className="mt-4 text-xs text-gray-500 space-y-1">
-          <p>Contract: {LOGCHAIN_SINGLETON_ADDR}</p>
-          <p>Network: Base</p>
-          <p>Contract creation block: {CONTRACT_CREATION_BLOCK}</p>
-          <p>Status: {ready ? '🟢 Ready' : '🔴 Not Ready'} {(isInitialLoading || isLoadingMore) ? '⏳ Loading' : ''}</p>
-        </div>
+        {isActivityLogOpen ? null : (
+          /* Debug Info - Only show when activity log is closed */
+          <div className="fixed bottom-4 left-4 text-xs text-gray-500 space-y-1 bg-black/80 backdrop-blur-sm border border-gray-800 rounded-lg p-3 z-10">
+            <p>Contract: {LOGCHAIN_SINGLETON_ADDR}</p>
+            <p>Network: Base</p>
+            <p>Contract creation block: {CONTRACT_CREATION_BLOCK}</p>
+            <p>Status: {ready ? '🟢 Ready' : '🔴 Not Ready'} {(isInitialLoading || isLoadingMore) ? '⏳ Loading' : ''}</p>
+          </div>
+        )}
       </div>
     </div>
   );

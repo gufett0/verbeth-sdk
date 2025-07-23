@@ -23,6 +23,7 @@ import {
   MessageType,
   ContactStatus,
   generateTempMessageId,
+  generateConversationTopic,
 } from "../types.js";
 
 interface UseMessageProcessorProps {
@@ -193,6 +194,33 @@ export const useMessageProcessor = ({
           return [...prev, pendingHandshake];
         });
 
+        // Add handshake received message to chat
+        const conversationTopic = generateConversationTopic(
+          address,
+          cleanSenderAddress
+        );
+        const handshakeMessage: Message = {
+          id: generateTempMessageId(),
+          topic: conversationTopic,
+          sender: cleanSenderAddress,
+          recipient: address,
+          ciphertext: "",
+          timestamp: Date.now(),
+          blockTimestamp: Date.now(),
+          blockNumber: log.blockNumber,
+          direction: "incoming" as const,
+          decrypted: `Request received: "${handshakeContent.plaintextPayload}"`,
+          read: true,
+          nonce: 0,
+          dedupKey: `handshake-received-${log.transactionHash}`,
+          type: "system" as const,
+          ownerAddress: address,
+          status: "confirmed" as const,
+        };
+
+        await dbService.saveMessage(handshakeMessage);
+        setMessages((prev) => [...prev, handshakeMessage]);
+
         onLog(
           `📨 Handshake received from ${cleanSenderAddress.slice(0, 8)}... ${
             isVerified ? "✅" : "⚠️"
@@ -312,6 +340,31 @@ export const useMessageProcessor = ({
             isVerified ? "Verified ✅" : "Unverified! ⚠️"
           }: "${decryptedResponse.note}"`
         );
+        // Add handshake response message to chat
+        const conversationTopic = generateConversationTopic(address, responder);
+        const responseMessage: Message = {
+          id: generateTempMessageId(),
+          topic: conversationTopic,
+          sender: responder,
+          recipient: address,
+          ciphertext: "",
+          timestamp: Date.now(),
+          blockTimestamp: Date.now(),
+          blockNumber: 0,
+          direction: "incoming" as const,
+          decrypted: `Request accepted: "${
+            decryptedResponse.note || "No message"
+          }"`,
+          read: true,
+          nonce: 0,
+          dedupKey: `handshake-response-${inResponseTo}`,
+          type: "system" as const,
+          ownerAddress: address,
+          status: "confirmed" as const,
+        };
+
+        await dbService.saveMessage(responseMessage);
+        setMessages((prev) => [...prev, responseMessage]);
       } catch (error) {
         onLog(`✗ Failed to process handshake response log: ${error}`);
       }
@@ -327,7 +380,10 @@ export const useMessageProcessor = ({
       try {
         const log = event.rawLog;
         const abiCoder = new AbiCoder();
-        const decoded = abiCoder.decode(["bytes", "uint256", "uint256"], log.data);
+        const decoded = abiCoder.decode(
+          ["bytes", "uint256", "uint256"],
+          log.data
+        );
         const [ciphertextBytes, timestamp, nonce] = decoded;
         const topic = log.topics[2];
 
@@ -364,11 +420,17 @@ export const useMessageProcessor = ({
             address // owner (che per outgoing == sender)
           );
 
-          // ✅ FALLBACK 
+          // ✅ FALLBACK
           if (!existingOutgoingMessage) {
-            const potentialDedupKey = generateDedupKey(address, topic, Number(nonce));
-            existingOutgoingMessage = await dbService.findMessageByDedupKey(potentialDedupKey);
-            
+            const potentialDedupKey = generateDedupKey(
+              address,
+              topic,
+              Number(nonce)
+            );
+            existingOutgoingMessage = await dbService.findMessageByDedupKey(
+              potentialDedupKey
+            );
+
             if (existingOutgoingMessage) {
               onLog(`Found message by dedupKey: ${potentialDedupKey}`);
             }
@@ -498,9 +560,7 @@ export const useMessageProcessor = ({
             )
           );
 
-          onLog(
-            `Message from ${sender.slice(0, 8)}...: "${decryptedMessage}"`
-          );
+          onLog(`Message from ${sender.slice(0, 8)}...: "${decryptedMessage}"`);
         }
       } catch (error) {
         onLog(`✗ Failed to process message log: ${error}`);

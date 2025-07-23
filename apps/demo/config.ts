@@ -7,23 +7,19 @@ import {
   walletConnectWallet,
 } from '@rainbow-me/rainbowkit/wallets';
 
+
 const projectId = 'abcd4fa063dd349643afb0bdc85bb248';
 const name       = 'Unstoppable Chat';
 
 
-type CoinbaseParams = Parameters<typeof coinbaseWallet>[0];
-const coinbaseEoa = (params: CoinbaseParams) => {
-  const wallet = coinbaseWallet({ ...params, appName: name });
-  (wallet as any).id         = 'coinbase';
-  (wallet as any).preference = 'smartWallet';
-  (wallet as any).meta       = { name: 'Coinbase Mobile / EOA' };
-  return wallet;
-};
+
+coinbaseWallet.preference = 'smartWalletOnly'; 
 const connectors = connectorsForWallets(
   [
     {
       groupName: 'Recommended',
-      wallets: [coinbaseEoa],
+      wallets: [
+        coinbaseWallet],
     },
     {
       groupName: 'Other options',

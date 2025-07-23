@@ -31,6 +31,7 @@ import {
   generateConversationTopic, generateTempMessageId
 } from './types.js';
 import { InitialForm } from './components/InitialForm.js';
+//import { createBaseAccountSDK } from "@base-org/account";
 
 
 export default function App() {
@@ -56,6 +57,7 @@ export default function App() {
 
   // Refs for logging
   const logRef = useRef<HTMLTextAreaElement>(null);
+  //const sdk = useRef<ReturnType<typeof createBaseAccountSDK>>();
 
   const addLog = useCallback((message: string) => {
     if (logRef.current) {
@@ -101,14 +103,13 @@ export default function App() {
     handleInitialization();
   }, [ready, readProvider, walletClient, address]);
 
-  // Hide handshake form when we have contacts
+  // hide handshake form when we have contacts
   useEffect(() => {
     setShowHandshakeForm(contacts.length === 0);
   }, [contacts.length]);
 
   const handleInitialization = useCallback(async () => {
     try {
-      // Reset everything if not ready
       if (!ready || !readProvider || !walletClient || !address) {
         setCurrentAccount(null);
         setIdentityKeyPair(null);
@@ -120,79 +121,107 @@ export default function App() {
         return;
       }
 
-      // Step 1: Initialize contract and signer FIRST
-      addLog(`...Initializing for account: ${address.slice(0, 8)}...`);
+      console.log(`...Initializing for account: ${address.slice(0, 8)}...`);
 
+      // get current provider from wagmi
       const ethersProvider = new BrowserProvider(walletClient.transport);
       const ethersSigner = await ethersProvider.getSigner();
 
-      // Verify signer matches the current address
-      const signerAddress = await ethersSigner.getAddress();
-      if (signerAddress.toLowerCase() !== address.toLowerCase()) {
-        addLog(`✗ Signer mismatch: expected ${address.slice(0, 8)}, got ${signerAddress.slice(0, 8)}`);
-        return;
+      let isBaseSmartAccount = false;
+      let publicIdentity = address;
+      let executorInstance: IExecutor;
+
+      try {
+        // test if wallet smart account features
+        const capabilities = await walletClient.transport.request({
+          method: 'wallet_getCapabilities',
+          params: [address]
+        }).catch(() => null);
+
+        const hasSmartAccountFeatures = capabilities &&
+          Object.values(capabilities).some((chainCaps: any) =>
+            chainCaps?.paymasterService || chainCaps?.atomicBatch
+          );
+
+        if (hasSmartAccountFeatures) {
+          isBaseSmartAccount = true;
+          executorInstance = ExecutorFactory.createBaseSmartAccount(
+            walletClient.transport,
+            LOGCHAIN_SINGLETON_ADDR,
+            8453 
+          );
+          console.log(`Smart Account detected: ${address.slice(0, 8)}...`);
+        } else {
+          // fallback to EOA
+          const contractInstance = LogChainV1__factory.connect(LOGCHAIN_SINGLETON_ADDR, ethersSigner as any);
+          executorInstance = ExecutorFactory.createEOA(contractInstance);
+          setContract(contractInstance);
+          console.log(`Using EOA mode: ${address.slice(0, 8)}...`);
+        }
+      } catch (error) {
+        const contractInstance = LogChainV1__factory.connect(LOGCHAIN_SINGLETON_ADDR, ethersSigner as any);
+        executorInstance = ExecutorFactory.createEOA(contractInstance);
+        setContract(contractInstance);
+        console.log(`Capability check failed, using EOA mode: ${address.slice(0, 8)}...`);
       }
 
-      const contractInstance = LogChainV1__factory.connect(LOGCHAIN_SINGLETON_ADDR, ethersSigner as any);
-      const executorInstance = ExecutorFactory.createEOA(contractInstance);
-
-      // Set contract and signer
-      setContract(contractInstance);
       setSigner(ethersSigner);
       setExecutor(executorInstance);
 
-      // Step 2: Handle account change if needed
-      if (address !== currentAccount) {
-        addLog(`Account ${currentAccount ? 'changed' : 'connected'}: ${address.slice(0, 8)}...`);
+      if (publicIdentity !== currentAccount) {
+        console.log(`Account ${currentAccount ? 'changed' : 'connected'}: ${publicIdentity.slice(0, 8)}...${isBaseSmartAccount ? ' (Smart Account)' : ' (EOA)'}`);
 
-        // Clear current state
         setIdentityKeyPair(null);
         setDerivationProof(null);
         setSelectedContact(null);
 
-        // Switch account in database service
-        await dbService.switchAccount(address);
-
-        // Update current account
-        setCurrentAccount(address);
+        await dbService.switchAccount(publicIdentity);
+        setCurrentAccount(publicIdentity);
       }
 
-      // Step 3: Initialize or load identity
-      addLog(`🔑 Loading identity for ${address.slice(0, 8)}...`);
+      console.log(`Loading identity for ${publicIdentity.slice(0, 8)}...`);
 
-      // Check database first
-      const storedIdentity = await dbService.getIdentity(address);
+      const storedIdentity = await dbService.getIdentity(publicIdentity);
 
       if (storedIdentity) {
         setIdentityKeyPair(storedIdentity.keyPair);
         setDerivationProof(storedIdentity.proof ?? null);
-        addLog(`✅ Identity keys restored from database: ${Buffer.from(storedIdentity.keyPair.publicKey).toString('hex').slice(0, 16)}...`);
+        console.log(`Identity keys restored from database`);
       } else {
-        // Derive new identity
-        addLog("🔑 Deriving new identity key from wallet...");
-        const result = await deriveIdentityKeyPairWithProof(ethersSigner, address);
+        try {
+          console.log("Deriving new identity key...");
 
-        setIdentityKeyPair(result.keyPair);
-        setDerivationProof(result.derivationProof);
+          const result = await deriveIdentityKeyPairWithProof(ethersSigner, address);
 
-        // Save to database
-        const identityToStore: StoredIdentity = {
-          address,
-          keyPair: result.keyPair,
-          derivedAt: Date.now(),
-          proof: result.derivationProof
-        };
+          setIdentityKeyPair(result.keyPair);
+          setDerivationProof(result.derivationProof);
 
-        await dbService.saveIdentity(identityToStore);
+          const identityToStore: StoredIdentity = {
+            address: publicIdentity,
+            keyPair: result.keyPair,
+            derivedAt: Date.now(),
+            proof: result.derivationProof
+          };
 
-        addLog(`✅ New identity key derived and saved: ${Buffer.from(result.keyPair.publicKey).toString('hex').slice(0, 16)}...`);
+          await dbService.saveIdentity(identityToStore);
+          console.log(`New identity key derived and saved`);
+
+        } catch (signError: any) {
+          if (signError.code === 4001) {
+            console.log("User rejected signing request.");
+            return;
+          } else {
+            console.log(`✗ Failed to derive identity: ${signError.message}`);
+            return;
+          }
+        }
       }
 
-      addLog("✅ Initialization complete");
+      console.log(`Initialization complete - Mode: ${isBaseSmartAccount ? 'Smart Account' : 'EOA'}`);
 
     } catch (error) {
       console.error("Failed to initialize:", error);
-      addLog(`✗ Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.log(`✗ Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }, [ready, readProvider, walletClient, address, currentAccount, addLog]);
 

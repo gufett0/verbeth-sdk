@@ -202,6 +202,16 @@ export class BaseSmartAccountExecutor implements IExecutor {
         params: [requestParams]
       });
       
+      console.log('🔍 DEBUG: wallet_sendCalls result:', result);
+      console.log('🔍 DEBUG: result type:', typeof result);
+      
+      // first 32 bytes are the actual userop hash
+      if (typeof result === 'string' && result.startsWith('0x') && result.length > 66) {
+        const actualTxHash = '0x' + result.slice(2, 66); // Extract first 32 bytes
+        console.log('🔍 DEBUG: extracted tx hash:', actualTxHash);        
+        return { hash: actualTxHash };
+      }
+      
       return result;
     } catch (error) {
       console.error('Base Smart Account transaction failed:', error);

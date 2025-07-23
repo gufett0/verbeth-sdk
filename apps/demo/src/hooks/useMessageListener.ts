@@ -123,9 +123,7 @@ export const useMessageListener = ({
           return [];
         }
 
-        onLog(
-          `✗ RPC error on range ${fromBlock}-${toBlock}: ${error.message}`
-        );
+        onLog(`✗ RPC error on range ${fromBlock}-${toBlock}: ${error.message}`);
         return [];
       }
     }
@@ -202,7 +200,6 @@ export const useMessageListener = ({
     const allEvents: ProcessedEvent[] = [];
 
     try {
-      // 1. Handshakes to me
       const handshakeFilter = {
         address: LOGCHAIN_SINGLETON_ADDR,
         topics: [EVENT_SIGNATURES.Handshake, userRecipientHash],
@@ -227,18 +224,11 @@ export const useMessageListener = ({
         }
       }
 
-      // 2. Load pending handshakes from fresh contacts
-      const pendingTxHashes = contacts
-        .filter((c) => c.status === "handshake_sent")
-        .map((c) => c.topic)
-        .filter(Boolean);
+      const pendingContacts = contacts.filter(
+        (c) => c.status === "handshake_sent"
+      );
 
-      //onLog(`Debug: Found ${pendingTxHashes.length} pending handshakes in blocks ${fromBlock}-${toBlock}`);
-      pendingTxHashes.forEach((hash, i) => {
-        onLog(`🔍 Pending[${i}]: ${hash}`);
-      });
-
-      if (pendingTxHashes.length > 0) {
+      if (pendingContacts.length > 0) {
         const responseFilter = {
           address: LOGCHAIN_SINGLETON_ADDR,
           topics: [EVENT_SIGNATURES.HandshakeResponse],
@@ -252,32 +242,31 @@ export const useMessageListener = ({
         onLog(
           `🔍 Found ${responseLogs.length} total handshake responses in blocks ${fromBlock}-${toBlock}`
         );
-        responseLogs.forEach((log, i) => {
-          onLog(`Response[${i}] inResponseTo: ${log.topics[1]}`);
-        });
 
-        const myResponses = responseLogs.filter((log) =>
-          pendingTxHashes.includes(log.topics[1])
-        );
+        // Match by responder address 
+        for (const log of responseLogs) {
+          const responderAddress = "0x" + log.topics[2].slice(-40);
 
-        onLog(`Filtered to ${myResponses.length} responses for me`);
+          const matchingContact = pendingContacts.find(
+            (c) => c.address.toLowerCase() === responderAddress.toLowerCase()
+          );
 
-        for (const log of myResponses) {
-          const logKey = `${log.transactionHash}-${log.logIndex}`;
-          if (!processedLogs.current.has(logKey)) {
-            processedLogs.current.add(logKey);
-            allEvents.push({
-              logKey,
-              eventType: "handshake_response",
-              rawLog: log,
-              blockNumber: log.blockNumber,
-              timestamp: Date.now(),
-            });
+          if (matchingContact) {
+            const logKey = `${log.transactionHash}-${log.logIndex}`;
+            if (!processedLogs.current.has(logKey)) {
+              processedLogs.current.add(logKey);
+              allEvents.push({
+                logKey,
+                eventType: "handshake_response",
+                rawLog: log,
+                blockNumber: log.blockNumber,
+                timestamp: Date.now(),
+              });
+            }
           }
         }
       }
 
-      // 3. Messages from established contacts
       const establishedContacts = contacts.filter(
         (c) => c.status === "established"
       );
@@ -287,7 +276,6 @@ export const useMessageListener = ({
             "0x" + c.address.replace("0x", "").toLowerCase().padStart(64, "0")
         );
 
-        // 👉 aggiungi il tuo indirizzo così il listener vede i tuoi messaggi in uscita
         if (address) {
           const myTopic =
             "0x" + address.replace("0x", "").toLowerCase().padStart(64, "0");
@@ -325,7 +313,7 @@ export const useMessageListener = ({
     return allEvents;
   };
 
-  // Initial backward scan (unchanged)
+  // Initial backward scan
   const performInitialScan = useCallback(async () => {
     if (!readProvider || !address || isInitialLoading) return;
 
@@ -334,7 +322,6 @@ export const useMessageListener = ({
     if (initialScanComplete) {
       onLog(`✅ Initial scan already completed for ${address.slice(0, 8)}...`);
 
-      // Load from database
       const savedLastBlock = await dbService.getLastKnownBlock();
       const savedOldestBlock = await dbService.getOldestScannedBlock();
 

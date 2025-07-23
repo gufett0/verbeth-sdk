@@ -114,7 +114,8 @@ export class BaseSmartAccountExecutor implements IExecutor {
   constructor(
     private baseAccountProvider: any,
     private logChainAddress: string,
-    chainId = 8453 // Base mainnet by default
+    chainId = 8453, // Base mainnet by default
+    private paymasterServiceUrl?: string
   ) {
     this.logChainInterface = new Interface([
       "function sendMessage(bytes calldata ciphertext, bytes32 topic, uint256 timestamp, uint256 nonce)",
@@ -182,13 +183,23 @@ export class BaseSmartAccountExecutor implements IExecutor {
 
   private async executeCalls(calls: Array<{ to: string, value: string, data: string }>) {
     try {
+      const requestParams: any = {
+        version: '1.0',
+        chainId: this.chainId,
+        calls
+      };
+
+      if (this.paymasterServiceUrl) {
+        requestParams.capabilities = {
+          paymasterService: {
+            url: this.paymasterServiceUrl
+          }
+        };
+      }
+
       const result = await this.baseAccountProvider.request({
         method: 'wallet_sendCalls',
-        params: [{
-          version: '1.0',
-          chainId: this.chainId,
-          calls
-        }]
+        params: [requestParams]
       });
       
       return result;
@@ -485,9 +496,10 @@ export class ExecutorFactory {
   static createBaseSmartAccount(
     baseAccountProvider: any,
     logChainAddress: string,
-    chainId = 8453 // Base mainnet by default
+    chainId = 8453, // Base mainnet by default
+    paymasterServiceUrl : string
   ): IExecutor {
-    return new BaseSmartAccountExecutor(baseAccountProvider, logChainAddress, chainId);
+    return new BaseSmartAccountExecutor(baseAccountProvider, logChainAddress, chainId, paymasterServiceUrl);
   }
 
   static createUserOp(
@@ -535,7 +547,6 @@ export class ExecutorFactory {
       isTestEnvironment?: boolean;
     }
   ): Promise<IExecutor> {
-    // 1. Check for explicit Base Smart Account provider
     if (options?.baseAccountProvider && options?.logChainAddress) {
       return new BaseSmartAccountExecutor(
         options.baseAccountProvider,
@@ -544,18 +555,17 @@ export class ExecutorFactory {
       );
     }
 
-    // 2. Try to auto-detect Base Smart Account by checking provider methods
     try {
       const provider = signerOrAccount?.provider || signerOrAccount;
       if (provider && typeof provider.request === 'function') {
-        // Test if provider supports wallet_sendCalls (Base Smart Account feature)
+        // test if provider supports wallet_sendCalls 
         const capabilities = await provider.request({
           method: 'wallet_getCapabilities',
           params: []
         }).catch(() => null);
         
         if (capabilities && options?.logChainAddress) {
-          // If wallet supports capabilities, it's likely a Base Smart Account
+          // if wallet supports capabilities, it's likely a Base Smart Account
           return new BaseSmartAccountExecutor(
             provider,
             options.logChainAddress,
@@ -564,10 +574,8 @@ export class ExecutorFactory {
         }
       }
     } catch (error) {
-      // Auto-detection failed, continue with other options
     }
 
-    // 3. Check for traditional Account Abstraction setups
     if (
       signerOrAccount.address &&
       (options?.bundlerClient || options?.entryPointContract)
@@ -600,7 +608,7 @@ export class ExecutorFactory {
       }
     }
 
-    // 4. Default to EOA executor
+    // default to EOA executor
     return new EOAExecutor(contract);
   }
 }

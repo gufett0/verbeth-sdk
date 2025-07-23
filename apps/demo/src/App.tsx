@@ -130,6 +130,7 @@ export default function App() {
       let isBaseSmartAccount = false;
       let publicIdentity = address;
       let executorInstance: IExecutor;
+      const paymasterUrl = import.meta.env.VITE_PAYMASTER_AND_BUNDLER_ENDPOINT;
 
       try {
         // test if wallet smart account features
@@ -148,9 +149,15 @@ export default function App() {
           executorInstance = ExecutorFactory.createBaseSmartAccount(
             walletClient.transport,
             LOGCHAIN_SINGLETON_ADDR,
-            8453 
+            8453,
+            paymasterUrl 
           );
-          console.log(`Smart Account detected: ${address.slice(0, 8)}...`);
+          
+          if (paymasterUrl) {
+            console.log(`Smart Account with gas sponsorship detected: ${address.slice(0, 8)}...`);
+          } else {
+            console.log(`Smart Account detected: ${address.slice(0, 8)}...`);
+          }
         } else {
           // fallback to EOA
           const contractInstance = LogChainV1__factory.connect(LOGCHAIN_SINGLETON_ADDR, ethersSigner as any);
@@ -217,7 +224,8 @@ export default function App() {
         }
       }
 
-      console.log(`Initialization complete - Mode: ${isBaseSmartAccount ? 'Smart Account' : 'EOA'}`);
+      const sponsorshipStatus = isBaseSmartAccount && paymasterUrl ? ' with gas sponsorship' : '';
+      console.log(`Initialization complete - Mode: ${isBaseSmartAccount ? 'Smart Account' : 'EOA'}${sponsorshipStatus}`);
 
     } catch (error) {
       console.error("Failed to initialize:", error);

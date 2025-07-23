@@ -11,10 +11,6 @@ export const MAX_RANGE_PROVIDER = 2_000;
 export const CHUNK_SIZE = 2_000;
 export const REAL_TIME_BUFFER = 3;
 
-const APP_NAME = "Unstoppable Chat"; 
-const APP_LOGO_URL = ""; 
-const APP_SUPPORTED_CHAIN_IDS = [8453, 84532]; // Base mainnet e testnet
-
 /* --------------------------- EVENT SIGNATURES ---------------------------- */
 export const EVENT_SIGNATURES = {
   MessageSent: keccak256(

@@ -112,10 +112,10 @@ export default function App() {
     handleInitialization();
   }, [ready, readProvider, walletClient, address]);
 
-  // hide handshake form when we have contacts
+  // hide handshake form when we have contacts AND user is connected
   useEffect(() => {
-  setShowHandshakeForm(!ready || contacts.length === 0);
-}, [ready, contacts.length]);
+    setShowHandshakeForm(!ready || !isConnected || contacts.length === 0);
+  }, [ready, isConnected, contacts.length]);
 
   const handleInitialization = useCallback(async () => {
     try {
@@ -535,8 +535,8 @@ export default function App() {
               message={message}
               setMessage={setMessage}
               onSendHandshake={sendHandshake}
-              contactsLength={contacts.length}
-              onBackToChats={() => setShowHandshakeForm(false)}
+              contactsLength={isConnected ? contacts.length : 0}
+              onBackToChats={isConnected && contacts.length > 0 ? () => setShowHandshakeForm(false) : undefined}
             />
           ) : (
             /* Main Chat Layout */
@@ -618,7 +618,9 @@ export default function App() {
                     <div className="flex-1 overflow-y-auto space-y-2 mb-4">
                       {messages
                         .filter(m => {
-                          const conversationTopic = generateConversationTopic(address as string, selectedContact.address);
+                          // Controllo di sicurezza: se non abbiamo address o selectedContact, non mostrare messaggi
+                          if (!address || !selectedContact?.address) return false;
+                          const conversationTopic = generateConversationTopic(address, selectedContact.address);
                           return (
                             m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
                             (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||
@@ -652,7 +654,9 @@ export default function App() {
                           </div>
                         ))}
                       {messages.filter(m => {
-                        const conversationTopic = generateConversationTopic(address as string, selectedContact.address);
+                        // Controllo di sicurezza: se non abbiamo address o selectedContact, return false
+                        if (!address || !selectedContact?.address) return false;
+                        const conversationTopic = generateConversationTopic(address, selectedContact.address);
                         return (
                           m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
                           (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||

@@ -30,33 +30,33 @@ export function InitialForm({
     <div className="flex items-center justify-center min-h-[60vh]">
       <div className="border border-gray-800 rounded-lg p-8 w-full max-w-md">
         <div className="flex items-center justify-between mb-6">
-  {contactsLength > 0 ? (
-    <>
-      <div>
-        <h2 className="text-2xl font-semibold text-left">
-          New Chat
-        </h2>
-      </div>
-      <button
-        onClick={onBackToChats}
-        className="text-sm text-gray-400 hover:text-white flex items-center gap-1 transition-colors"
-      >
-        ← Back to chats
-      </button>
-    </>
-  ) : (
-    <div className="w-full text-center">
-      <h2 className="text-2xl font-semibold">
-        Start Your First Chat
-      </h2>
-      <div className="mt-2">
-        <span className="text-sm text-gray-400">
-          Unstoppable. Private by design.
-        </span>
-      </div>
-    </div>
-  )}
-</div>
+          {contactsLength > 0 ? (
+            <>
+              <div>
+                <h2 className="text-2xl font-semibold text-left">
+                  New Chat
+                </h2>
+              </div>
+              <button
+                onClick={onBackToChats}
+                className="text-sm text-gray-400 hover:text-white flex items-center gap-1 transition-colors"
+              >
+                ← Back to chats
+              </button>
+            </>
+          ) : (
+            <div className="w-full text-center">
+              <h2 className="text-2xl font-semibold">
+                Start Your First Chat
+              </h2>
+              <div className="mt-2">
+                <span className="text-sm text-gray-400">
+                  Unstoppable. Private by design.
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
 
         <div className="space-y-4">
           <input

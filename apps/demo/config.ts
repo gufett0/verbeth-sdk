@@ -1,73 +1,39 @@
-import { http, createConfig } from 'wagmi'
-import { base, mainnet, baseSepolia } from 'wagmi/chains'
-import { connectorsForWallets } from '@rainbow-me/rainbowkit'
+import { http, createConfig } from 'wagmi';
+import { base, mainnet } from 'wagmi/chains';
+import { connectorsForWallets } from '@rainbow-me/rainbowkit';
 import {
-  argentWallet,
-  braveWallet,
   coinbaseWallet,
-  injectedWallet,
-  ledgerWallet,
   metaMaskWallet,
-  okxWallet,
-  phantomWallet,
-  rabbyWallet,
-  rainbowWallet,
-  safeWallet,
-  trustWallet,
-  uniswapWallet,
   walletConnectWallet,
-  xdefiWallet,
-  zerionWallet,
-} from '@rainbow-me/rainbowkit/wallets'
+} from '@rainbow-me/rainbowkit/wallets';
+
 
 const projectId = 'abcd4fa063dd349643afb0bdc85bb248';
+const name       = 'Unstoppable Chat';
+
+
+//coinbaseWallet.preference = 'smartWalletOnly'; 
 
 const connectors = connectorsForWallets(
   [
     {
       groupName: 'Recommended',
       wallets: [
-        metaMaskWallet,
-        coinbaseWallet,
-        rainbowWallet,
-        walletConnectWallet,
-      ],
+        metaMaskWallet],
     },
     {
-      groupName: 'Popular',
-      wallets: [
-        trustWallet,
-        ledgerWallet,
-        braveWallet,
-        uniswapWallet,
-        phantomWallet,
-      ],
-    },
-    {
-      groupName: 'More Options',
-      wallets: [
-        argentWallet,
-        rabbyWallet,
-        okxWallet,
-        xdefiWallet,
-        zerionWallet,
-        safeWallet,
-        injectedWallet,
-      ],
+      groupName: 'Other options',
+      wallets: [walletConnectWallet],
     },
   ],
-  {
-    appName: 'Helios × VerbEth Demo',
-    projectId,
-  }
-)
+  { appName: name, projectId }
+);
 
 export const config = createConfig({
   connectors,
-  chains: [base, mainnet, baseSepolia],
+  chains: [base, mainnet],
   transports: {
-    [mainnet.id]: http(),
-    [base.id]: http('https://base-rpc.publicnode.com'),
-    [baseSepolia.id]: http('https://base-sepolia-rpc.publicnode.com'),
+    [mainnet.id]:    http(),
+    [base.id]:       http('https://base-rpc.publicnode.com'),
   },
-})
+});

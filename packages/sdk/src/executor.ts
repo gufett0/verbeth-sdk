@@ -106,6 +106,145 @@ export class EOAExecutor implements IExecutor {
   }
 }
 
+// Base Smart Account Executor - Uses wallet_sendCalls for sponsored transactions
+export class BaseSmartAccountExecutor implements IExecutor {
+  private logChainInterface: Interface;
+  private chainId: string;
+
+  constructor(
+    private baseAccountProvider: any,
+    private logChainAddress: string,
+    chainId = 8453, // Base mainnet by default
+    private paymasterServiceUrl?: string,
+    private subAccountAddress?: string
+  ) {
+    this.logChainInterface = new Interface([
+      "function sendMessage(bytes calldata ciphertext, bytes32 topic, uint256 timestamp, uint256 nonce)",
+      "function initiateHandshake(bytes32 recipientHash, bytes pubKeys, bytes ephemeralPubKey, bytes plaintextPayload)",
+      "function respondToHandshake(bytes32 inResponseTo, bytes ciphertext)",
+    ]);
+
+    // Convert chainId to hex
+    this.chainId =
+      chainId === 8453
+        ? "0x2105" // Base mainnet
+        : chainId === 84532
+        ? "0x14a34" // Base Sepolia
+        : `0x${chainId.toString(16)}`;
+  }
+
+  async sendMessage(
+    ciphertext: Uint8Array,
+    topic: string,
+    timestamp: number,
+    nonce: bigint
+  ): Promise<any> {
+    const callData = this.logChainInterface.encodeFunctionData("sendMessage", [
+      ciphertext,
+      topic,
+      timestamp,
+      nonce,
+    ]);
+
+    return this.executeCalls([
+      {
+        to: this.logChainAddress,
+        value: "0x0",
+        data: callData,
+      },
+    ]);
+  }
+
+  async initiateHandshake(
+    recipientHash: string,
+    pubKeys: string,
+    ephemeralPubKey: string,
+    plaintextPayload: Uint8Array
+  ): Promise<any> {
+    const callData = this.logChainInterface.encodeFunctionData(
+      "initiateHandshake",
+      [recipientHash, pubKeys, ephemeralPubKey, plaintextPayload]
+    );
+
+    return this.executeCalls([
+      {
+        to: this.logChainAddress,
+        value: "0x0",
+        data: callData,
+      },
+    ]);
+  }
+
+  async respondToHandshake(
+    inResponseTo: string,
+    ciphertext: Uint8Array
+  ): Promise<any> {
+    const callData = this.logChainInterface.encodeFunctionData(
+      "respondToHandshake",
+      [inResponseTo, ciphertext]
+    );
+
+    return this.executeCalls([
+      {
+        to: this.logChainAddress,
+        value: "0x0",
+        data: callData,
+      },
+    ]);
+  }
+
+  private async executeCalls(
+    calls: Array<{ to: string; value: string; data: string }>
+  ) {
+    try {
+      //console.log("DEBUG: Sub account address:", this.subAccountAddress);
+      const requestParams: any = {
+        version: "1.0",
+        chainId: this.chainId,
+        calls,
+      };
+
+      //** WORK IN PROGRESS */
+      if (this.subAccountAddress) {
+        requestParams.from = this.subAccountAddress;
+        //console.log("DEBUG: Using sub account for transaction");
+      }
+
+      if (this.paymasterServiceUrl) {
+        requestParams.capabilities = {
+          paymasterService: {
+            url: this.paymasterServiceUrl,
+          },
+        };
+        //console.log("DEBUG: Using paymaster for gas sponsorship");
+      }
+
+      //console.log("DEBUG: Request params:", requestParams);
+
+      const result = await this.baseAccountProvider.request({
+        method: "wallet_sendCalls",
+        params: [requestParams],
+      });
+
+      // first 32 bytes are the actual userop hash
+      if (
+        typeof result === "string" &&
+        result.startsWith("0x") &&
+        result.length > 66
+      ) {
+        const actualTxHash = "0x" + result.slice(2, 66); // Extract first 32 bytes
+        //console.log("DEBUG: extracted tx hash:", actualTxHash);
+        return { hash: actualTxHash };
+      }
+
+      return result;
+    } catch (error) {
+      console.error("Base Smart Account transaction failed:", error);
+      throw error;
+    }
+  }
+}
+
 // UserOp Executor - Account Abstraction via bundler
 export class UserOpExecutor implements IExecutor {
   private logChainInterface: Interface;
@@ -263,7 +402,6 @@ export class DirectEntryPointExecutor implements IExecutor {
     timestamp: number,
     nonce: bigint
   ): Promise<any> {
-
     const logChainCallData = this.logChainInterface.encodeFunctionData(
       "sendMessage",
       [ciphertext, topic, timestamp, nonce]
@@ -281,14 +419,12 @@ export class DirectEntryPointExecutor implements IExecutor {
     return this.executeDirectUserOp(smartAccountCallData);
   }
 
-  
   async initiateHandshake(
     recipientHash: string,
     pubKeys: string,
     ephemeralPubKey: string,
     plaintextPayload: Uint8Array
   ): Promise<any> {
-
     const logChainCallData = this.logChainInterface.encodeFunctionData(
       "initiateHandshake",
       [recipientHash, pubKeys, ephemeralPubKey, plaintextPayload]
@@ -306,13 +442,10 @@ export class DirectEntryPointExecutor implements IExecutor {
     return this.executeDirectUserOp(smartAccountCallData);
   }
 
-  
-
   async respondToHandshake(
     inResponseTo: string,
     ciphertext: Uint8Array
   ): Promise<any> {
-
     const logChainCallData = this.logChainInterface.encodeFunctionData(
       "respondToHandshake",
       [inResponseTo, ciphertext]
@@ -389,6 +522,22 @@ export class ExecutorFactory {
     return new EOAExecutor(contract);
   }
 
+  static createBaseSmartAccount(
+    baseAccountProvider: any,
+    logChainAddress: string,
+    chainId = 8453, // Base mainnet by default
+    paymasterServiceUrl?: string,
+    subAccountAddress?: string
+  ): IExecutor {
+    return new BaseSmartAccountExecutor(
+      baseAccountProvider,
+      logChainAddress,
+      chainId,
+      paymasterServiceUrl,
+      subAccountAddress
+    );
+  }
+
   static createUserOp(
     smartAccountAddress: string,
     _entryPointAddress: string,
@@ -429,9 +578,41 @@ export class ExecutorFactory {
       entryPointContract?: Contract | BaseContract;
       logChainAddress?: string;
       bundlerClient?: any;
+      baseAccountProvider?: any;
+      chainId?: number;
       isTestEnvironment?: boolean;
     }
   ): Promise<IExecutor> {
+    if (options?.baseAccountProvider && options?.logChainAddress) {
+      return new BaseSmartAccountExecutor(
+        options.baseAccountProvider,
+        options.logChainAddress,
+        options.chainId || 8453
+      );
+    }
+
+    try {
+      const provider = signerOrAccount?.provider || signerOrAccount;
+      if (provider && typeof provider.request === "function") {
+        // test if provider supports wallet_sendCalls
+        const capabilities = await provider
+          .request({
+            method: "wallet_getCapabilities",
+            params: [],
+          })
+          .catch(() => null);
+
+        if (capabilities && options?.logChainAddress) {
+          // if wallet supports capabilities, it's likely a Base Smart Account
+          return new BaseSmartAccountExecutor(
+            provider,
+            options.logChainAddress,
+            options.chainId || 8453
+          );
+        }
+      }
+    } catch (error) {}
+
     if (
       signerOrAccount.address &&
       (options?.bundlerClient || options?.entryPointContract)
@@ -464,6 +645,7 @@ export class ExecutorFactory {
       }
     }
 
+    // default to EOA executor
     return new EOAExecutor(contract);
   }
 }

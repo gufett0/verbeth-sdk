@@ -80,7 +80,7 @@ export function InitialForm({
                   onClick={openConnectModal}
                   className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 rounded font-medium"
                 >
-                  Connect wallet
+                  Get started
                 </button>
               )}
             </ConnectButton.Custom>

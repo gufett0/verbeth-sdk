@@ -208,11 +208,10 @@ export function SideToastNotifications({
                                                     const input = document.getElementById(
                                                         `side-toast-response-${notif.id}`
                                                     ) as HTMLInputElement;
-                                                    if (input?.value.trim()) {
-                                                        notif.onAccept(input.value.trim());
-                                                        input.value = "";
-                                                        removeNotification(notif.id);
-                                                    }
+                                                    const note = input?.value ?? ""; 
+                                                    notif.onAccept(note.trim());
+                                                    if (input) input.value = "";
+                                                    removeNotification(notif.id);
                                                 }}
                                                 className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm flex items-center gap-1"
                                             >

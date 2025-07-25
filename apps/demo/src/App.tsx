@@ -32,6 +32,8 @@ import {
 } from './types.js';
 import { InitialForm } from './components/InitialForm.js';
 import { SideToastNotifications } from './components/SideToastNotification.js';
+import { IdentityCreation } from './components/IdentityCreation.js';
+import { CelebrationToast } from "./components/CelebrationToast.js";
 
 
 export default function App() {
@@ -48,6 +50,8 @@ export default function App() {
   const [currentAccount, setCurrentAccount] = useState<string | null>(null);
   const [showHandshakeForm, setShowHandshakeForm] = useState(true);
   const [handshakeToasts, setHandshakeToasts] = useState<any[]>([]);
+  const [needsIdentityCreation, setNeedsIdentityCreation] = useState(false);
+  const [showToast, setShowToast] = useState(false);
 
   const [identityKeyPair, setIdentityKeyPair] = useState<IdentityKeyPair | null>(null);
   const [derivationProof, setDerivationProof] = useState<DerivationProof | null>(null);
@@ -78,6 +82,45 @@ export default function App() {
       return newLogs;
     });
   }, [isActivityLogOpen]);
+
+
+  const createIdentity = useCallback(async () => {
+    if (!signer || !address) {
+      addLog("✗ Missing signer or address for identity creation");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog("Deriving new identity key...");
+
+      const result = await deriveIdentityKeyPairWithProof(signer, address);
+
+      setIdentityKeyPair(result.keyPair);
+      setDerivationProof(result.derivationProof);
+
+      const identityToStore: StoredIdentity = {
+        address: address,
+        keyPair: result.keyPair,
+        derivedAt: Date.now(),
+        proof: result.derivationProof
+      };
+
+      await dbService.saveIdentity(identityToStore);
+      console.log(`New identity key derived and saved`);
+      setNeedsIdentityCreation(false);
+      setShowToast(true);
+
+    } catch (signError: any) {
+      if (signError.code === 4001) {
+        console.log("User rejected signing request.");
+      } else {
+        console.log(`✗ Failed to derive identity: ${signError.message}`);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [signer, address, addLog]);
 
   const {
     messages,
@@ -140,8 +183,8 @@ export default function App() {
 
   // hide handshake form when we have contacts AND user is connected
   useEffect(() => {
-    setShowHandshakeForm(!ready || !isConnected || contacts.length === 0);
-  }, [ready, isConnected, contacts.length]);
+    setShowHandshakeForm(!ready || !isConnected || contacts.length === 0 || needsIdentityCreation);
+  }, [ready, isConnected, contacts.length, needsIdentityCreation]);
 
   const handleInitialization = useCallback(async () => {
     try {
@@ -153,6 +196,7 @@ export default function App() {
         setSigner(null);
         setContract(null);
         setExecutor(null);
+        setNeedsIdentityCreation(false);
         return;
       }
 
@@ -228,35 +272,11 @@ export default function App() {
       if (storedIdentity) {
         setIdentityKeyPair(storedIdentity.keyPair);
         setDerivationProof(storedIdentity.proof ?? null);
-        console.log(`Identity keys restored from database`);
+        setNeedsIdentityCreation(false);
+        addLog(`Identity keys restored from database`);
       } else {
-        try {
-          console.log("Deriving new identity key...");
-
-          const result = await deriveIdentityKeyPairWithProof(ethersSigner, address);
-
-          setIdentityKeyPair(result.keyPair);
-          setDerivationProof(result.derivationProof);
-
-          const identityToStore: StoredIdentity = {
-            address: publicIdentity,
-            keyPair: result.keyPair,
-            derivedAt: Date.now(),
-            proof: result.derivationProof
-          };
-
-          await dbService.saveIdentity(identityToStore);
-          console.log(`New identity key derived and saved`);
-
-        } catch (signError: any) {
-          if (signError.code === 4001) {
-            console.log("User rejected signing request.");
-            return;
-          } else {
-            console.log(`✗ Failed to derive identity: ${signError.message}`);
-            return;
-          }
-        }
+        console.log(`No identity found for ${publicIdentity.slice(0, 8)}...`);
+        setNeedsIdentityCreation(true);
       }
 
       const sponsorshipStatus = isBaseSmartAccount && paymasterUrl ? ' with gas sponsorship' : '';
@@ -316,7 +336,7 @@ export default function App() {
         blockTimestamp: Date.now(),
         blockNumber: 0,
         direction: 'outgoing' as const,
-        decrypted: `Request sent: "${message}"`,
+        decrypted: `Request: "${message}"`,
         read: true,
         nonce: 0,
         dedupKey: `handshake-${tx.hash}`,
@@ -501,7 +521,15 @@ export default function App() {
             removeNotification={removeToast}
           />
 
-          {showHandshakeForm ? (
+          <CelebrationToast show={showToast} onClose={() => setShowToast(false)} />
+
+          {needsIdentityCreation ? (
+            <IdentityCreation
+              loading={loading}
+              onCreateIdentity={createIdentity}
+              address={address!}
+            />
+          ) : showHandshakeForm ? (
             <InitialForm
               isConnected={isConnected}
               loading={loading}
@@ -542,12 +570,16 @@ export default function App() {
                           {contact.address.slice(0, 8)}...
                         </span>
                         <span className={`text-xs px-2 py-1 rounded ${contact.status === 'established'
-                          ? 'bg-green-800 text-green-200'
-                          : contact.status === 'handshake_sent'
-                            ? 'bg-yellow-800 text-yellow-200'
-                            : 'bg-gray-700 text-gray-300'
+                            ? 'bg-green-800 text-green-200'
+                            : contact.status === 'handshake_sent'
+                              ? 'bg-yellow-800 text-yellow-200'
+                              : 'bg-gray-700 text-gray-300'
                           }`}>
-                          {contact.status.replace('_', ' ')}
+                          {contact.status === 'established'
+                            ? 'connected'
+                            : contact.status === 'handshake_sent'
+                              ? 'request sent'
+                              : contact.status.replace('_', ' ')}
                         </span>
                       </div>
                       {contact.lastMessage && (

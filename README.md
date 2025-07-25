@@ -150,7 +150,7 @@ await sendEncryptedMessage({
 [ERC-1271](https://eips.ethereum.org/EIPS/eip-1271) lets a smart-contract wallet prove ownership by exposing `isValidSignature`.  
 Because the code that implements that function lives *inside* the contract, the check is impossible until the wallet is actually deployed. Any counter-factual (pre-deploy) account therefore fails a plain ERC-1271 test.
 
-In the current demo, if a user signs the initial handshake with a **fresh** Smart Account, the sdk can’t verify it yet, so the handshake appears to hang. Deployed accounts work fine.
+In the current [demo](apps/demo), if a user signs the initial handshake with a **fresh** Smart Account, the sdk can’t verify it yet, so the handshake appears to hang. Deployed accounts work fine.
 
 **Solution in Progress:** A new [`UniversalSigValidator`](packages/contracts/contracts/UniversalSigValidator.sol) contract to fully support [ERC-6492](https://eips.ethereum.org/EIPS/eip-6492) signatures.
 

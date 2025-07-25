@@ -2,9 +2,9 @@
 
 End-to-end encrypted messaging over Ethereum logs, using the blockchain as the only transport layer. Uses `tweetnacl.box` to encrypt/decrypt messages with ephemeral keys and optional sender identity. Ensures forward secrecy and compatibility with smart accounts.
 
-## How It Works: Alice & Bob (Handshake Flow)
+## How It Works: Alice & Bob (High-level Flow)
 
-👩‍💻 Alice wants to initiate a secure chat with Bob 👨‍💻 using only the blockchain.
+Alice wants to initiate a secure chat with Bob using only the blockchain.
 
 1. Alice generates a new **ephemeral keypair**.
 2. She emits a `Handshake` event:
@@ -22,9 +22,9 @@ End-to-end encrypted messaging over Ethereum logs, using the blockchain as the o
    - Alice signs messages using her **signing key**
    - Bob and Alice filter messages using topics, timestamp, or sender
 
-✅ **Forward Secrecy**: Every message uses fresh ephemeral keys, providing forward secrecy for all communication.
+--> **Forward Secrecy**: Every message uses fresh ephemeral keys, providing forward secrecy for all communication.
 
-✅ If the sender does not yet know the recipient's long-term public key (X25519), 
+If the sender does not yet know the recipient's long-term public key (X25519), 
 they must emit a `Handshake` event. This allows the recipient to reply with their key.
 
 If the recipient's public key is already known (from a past `HandshakeResponse`, 
@@ -110,18 +110,59 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
 - Fully on-chain: no servers, no relays
 - Compatible with EOAs and smart contract accounts
 
-## Usage (WIP)
+## Example Usage (WIP)
 
 ```ts
-import { decryptLog, initiateHandshake } from '@verbeth/sdk'
+import {
+  decryptLog,
+  initiateHandshake,
+  sendEncryptedMessage,
+  deriveIdentityKeyPairWithProof,
+} from '@verbeth/sdk';
 
-// Receive and decrypt a message
-const msg = decryptLog(eventLog, mySecretKey);
+// 1. Generate or load your long-term identity keypair
+const { publicKey, secretKey } = await deriveIdentityKeyPairWithProof(walletClient);
 
-// Start a handshake
+// 2. Receive and decrypt a message from an on-chain log event
+const decrypted = decryptLog(eventLog, secretKey);
+
+// 3. Start a handshake with another user
 await initiateHandshake({
-  contract,
-  recipientAddress: '0xBob...',
-  ephemeralPubKey: myEphemeral.publicKey,
-  plaintextPayload: 'Hi Bob, ping from Alice'
+  contract,                       // LogChainV1
+  recipientAddress: '0xBob...',   
+  ephemeralPubKey: ephemeralKey.publicKey, 
+  plaintextPayload: 'Hi Bob, ping from Alice', // (optional) plaintext handshake message
 });
+
+// 4. Send an encrypted message (after handshake is established)
+await sendEncryptedMessage({
+  contract,                        
+  recipientAddress: '0xBob...',
+  message: 'Hello again, Bob!',
+  senderEphemeralKeyPair: ephemeralKey, // ephemeral keypair used for forward secrecy
+  recipientPublicKey,              
+});
+```
+
+
+## ⚠️ Smart Account Handshake Limitation
+ 
+[ERC-1271](https://eips.ethereum.org/EIPS/eip-1271) lets a smart-contract wallet prove ownership by exposing `isValidSignature`.  
+Because the code that implements that function lives *inside* the contract, the check is impossible until the wallet is actually deployed. Any counter-factual (pre-deploy) account therefore fails a plain ERC-1271 test.
+
+In the current demo, if a user signs the initial handshake with a **fresh** Smart Account, the sdk can’t verify it yet, so the handshake appears to hang. Deployed accounts work fine.
+
+**Solution in Progress:** A new [`UniversalSigValidator`](packages/contracts/contracts/UniversalSigValidator.sol) contract to fully support [ERC-6492](https://eips.ethereum.org/EIPS/eip-6492) signatures.
+
+**Incoming fix — ERC-6492**  
+[ERC-6492](https://eips.ethereum.org/EIPS/eip-6492) standardises a workaround: you wrap the signature together with the account’s `initCode` and send it to a singleton validator that *simulates* the deployment plus the ERC-1271 call in one `eth_call`. For now, I’ve deployed that singleton—[`UniversalSigValidator`](packages/contracts/contracts/UniversalSigValidator.sol)—at  
+0x1964A76a7C76C9483f056244c1065Aa0A3a9802d // Base mainnet.
+
+Our client workflow will soon:
+
+1. **Try ERC-1271** on the account (works once it’s live).  
+2. **If that reverts**, wrap the signature in an ERC-6492 envelope and ask `UniversalSigValidator` to verify it.
+
+Once integrated, handshake verification will just work regardless of smart account deployment status.
+
+> **Until that release, unverified handshake for undeployed accounts are expected behaviour.**

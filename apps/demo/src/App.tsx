@@ -31,6 +31,8 @@ import {
   generateConversationTopic, generateTempMessageId
 } from './types.js';
 import { InitialForm } from './components/InitialForm.js';
+import { SideToastNotifications } from './components/SideToastNotification.js';
+
 
 export default function App() {
   const readProvider = useRpcProvider();
@@ -45,6 +47,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [currentAccount, setCurrentAccount] = useState<string | null>(null);
   const [showHandshakeForm, setShowHandshakeForm] = useState(true);
+  const [handshakeToasts, setHandshakeToasts] = useState<any[]>([]);
 
   const [identityKeyPair, setIdentityKeyPair] = useState<IdentityKeyPair | null>(null);
   const [derivationProof, setDerivationProof] = useState<DerivationProof | null>(null);
@@ -103,6 +106,29 @@ export default function App() {
     onLog: addLog,
     onEventsProcessed: processEvents
   });
+
+  // sync handshakeToasts
+  useEffect(() => {
+    if (!isConnected || !address) {
+      setHandshakeToasts([]);
+      return;
+    }
+    // maps pendingHandshakes in notifiche toast
+    setHandshakeToasts(
+      pendingHandshakes.map((h) => ({
+        id: h.id,
+        sender: h.sender,
+        message: h.message,
+        verified: h.verified,
+        onAccept: (msg: string) => acceptHandshake(h, msg),
+        onReject: () => removePendingHandshake(h.id),
+      }))
+    );
+  }, [pendingHandshakes, isConnected, address]);
+
+  const removeToast = (id: string) => {
+    setHandshakeToasts((prev) => prev.filter((n) => n.id !== id));
+  };
 
   useEffect(() => {
     setReady(readProvider !== null && isConnected && walletClient !== undefined);
@@ -340,7 +366,6 @@ export default function App() {
         lastTimestamp: Date.now()
       };
 
-      // Save to database
       await updateContact(newContact);
       await removePendingHandshake(handshake.id);
 
@@ -470,61 +495,11 @@ export default function App() {
       <div className="max-w-6xl mx-auto p-4 flex flex-col min-h-[80vh]">
         <div className="flex-1 flex flex-col">
 
-          {/* Notification Banner for Pending Handshakes */}
-          {pendingHandshakes.length > 0 && (
-            <div className="mb-6">
-              {pendingHandshakes.map((handshake) => (
-                <div key={handshake.id} className="bg-blue-900/20 border border-blue-700 rounded-lg p-4 mb-2">
-                  <div className="flex justify-between items-start">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="text-sm font-medium">Handshake from {handshake.sender.slice(0, 8)}...</span>
-                        <span className="text-xs">{handshake.verified ? '✅ Verified' : '⚠️ Unverified'}</span>
-                      </div>
-                      <p className="text-sm text-gray-300 mb-3">"{handshake.message}"</p>
-                      <div className="flex gap-2 items-center">
-                        <input
-                          type="text"
-                          placeholder="Your response..."
-                          className="flex-1 px-3 py-1 bg-gray-800 border border-gray-600 rounded text-sm"
-                          id={`response-${handshake.id}`}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              const target = e.target as HTMLInputElement;
-                              if (target.value.trim()) {
-                                acceptHandshake(handshake, target.value.trim());
-                                target.value = '';
-                              }
-                            }
-                          }}
-                        />
-                        <button
-                          onClick={() => {
-                            const input = document.getElementById(`response-${handshake.id}`) as HTMLInputElement;
-                            if (input?.value.trim()) {
-                              acceptHandshake(handshake, input.value.trim());
-                              input.value = '';
-                            }
-                          }}
-                          className="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm flex items-center gap-1"
-                        >
-                          <CheckIcon size={14} />
-                          Accept
-                        </button>
-                        <button
-                          onClick={() => removePendingHandshake(handshake.id)}
-                          className="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm flex items-center gap-1"
-                        >
-                          <XIcon size={14} />
-                          Reject
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          {/* Handshake Toast Notifiche */}
+          <SideToastNotifications
+            notifications={handshakeToasts}
+            removeNotification={removeToast}
+          />
 
           {showHandshakeForm ? (
             <InitialForm
@@ -714,83 +689,84 @@ export default function App() {
             </div>
           )}
 
-          {/* Activity Log */}
+          {/* Activity Log + Debug Info */}
           {ready && (
-            <div className="mt-8 border border-gray-800 rounded-lg">
-              <div
-                className="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-900/50 transition-colors"
-                onClick={() => setIsActivityLogOpen(!isActivityLogOpen)}
-              >
-                <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-semibold">Activity Log</h2>
-                    <span className="text-gray-400 text-sm">
-                      {isActivityLogOpen ? '▼' : '▶'}
-                    </span>
-                  </div>
-                  {canLoadMore && ready && isActivityLogOpen && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        loadMoreHistory();
-                      }}
-                      disabled={isLoadingMore}
-                      className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded flex items-center gap-2"
-                    >
-                      {isLoadingMore ? (
-                        <>
-                          <div className="animate-spin w-3 h-3 border border-gray-400 border-t-transparent rounded-full"></div>
-                          <span>Loading blocks...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>📂</span>
-                          <span>Load More History</span>
-                        </>
-                      )}
-                    </button>
-                  )}
-                </div>
-                {(isInitialLoading || isLoadingMore) && isActivityLogOpen && (
-                  <div className="flex items-center gap-2 text-sm text-blue-400">
-                    <div className="animate-spin w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full"></div>
-                    <span>{isInitialLoading ? 'Initial sync...' : 'Loading more...'}</span>
-                    {syncProgress && (
-                      <span>({syncProgress.current}/{syncProgress.total})</span>
+            <div className="fixed bottom-0 left-0 w-screen flex flex-col gap-2 px-2 sm:px-4 pb-4 z-30 pointer-events-none">
+              <div className="max-w-6xl w-full pointer-events-auto">
+                <div
+                  className="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-900/50 transition-colors"
+                  onClick={() => setIsActivityLogOpen(!isActivityLogOpen)}
+                >
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-lg font-semibold">Activity Log</h2>
+                      <span className="text-gray-400 text-sm">
+                        {isActivityLogOpen ? '▼' : '▶'}
+                      </span>
+                    </div>
+                    {canLoadMore && ready && isActivityLogOpen && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          loadMoreHistory();
+                        }}
+                        disabled={isLoadingMore}
+                        className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded flex items-center gap-2"
+                      >
+                        {isLoadingMore ? (
+                          <>
+                            <div className="animate-spin w-3 h-3 border border-gray-400 border-t-transparent rounded-full"></div>
+                            <span>Loading blocks...</span>
+                          </>
+                        ) : (
+                          <>
+                            <span>📂</span>
+                            <span>Load More History</span>
+                          </>
+                        )}
+                      </button>
                     )}
                   </div>
-                )}
-              </div>
+                  {(isInitialLoading || isLoadingMore) && isActivityLogOpen && (
+                    <div className="flex items-center gap-2 text-sm text-blue-400">
+                      <div className="animate-spin w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full"></div>
+                      <span>{isInitialLoading ? 'Initial sync...' : 'Loading more...'}</span>
+                      {syncProgress && (
+                        <span>({syncProgress.current}/{syncProgress.total})</span>
+                      )}
+                    </div>
+                  )}
+                </div>
 
-              <div
-                className={`overflow-hidden transition-all duration-300 ease-in-out ${isActivityLogOpen ? 'max-h-40 opacity-100' : 'max-h-0 opacity-0'
-                  }`}
-              >
-                <div className="p-4 pt-0">
-                  <textarea
-                    ref={logRef}
-                    readOnly
-                    value={activityLogs}
-                    className="w-full h-32 bg-gray-900 border border-gray-700 rounded p-2 text-sm font-mono text-gray-300 resize-none"
-                    placeholder="Activity will appear here..."
-                  />
+                <div
+                  className={`overflow-hidden transition-all duration-300 ease-in-out ${isActivityLogOpen ? 'max-h-40 opacity-100' : 'max-h-0 opacity-0'}`}
+
+                >
+                  <div className="p-4 pt-0">
+                    <textarea
+                      ref={logRef}
+                      readOnly
+                      value={activityLogs}
+                      className="w-full h-32 bg-gray-900 border border-gray-700 rounded p-2 text-sm font-mono text-gray-300 resize-none"
+                      placeholder="Activity will appear here..."
+                    />
+                  </div>
                 </div>
               </div>
+
+              {/* Debug Info */}
+              {!isActivityLogOpen && (
+                <div className="w-full bg-black/80 backdrop-blur-sm p-3 text-xs text-gray-500 space-y-1 h-fit">
+                  <p>Contract: {LOGCHAIN_SINGLETON_ADDR}</p>
+                  <p>Network: Base</p>
+                  <p>Contract creation block: {CONTRACT_CREATION_BLOCK}</p>
+                  <p>Status: {ready ? '🟢 Ready' : '🔴 Not Ready'} {(isInitialLoading || isLoadingMore) ? '⏳ Loading' : ''}</p>
+                </div>
+              )}
             </div>
           )}
 
         </div>
-
-        {/* Debug Info */}
-        {isActivityLogOpen ? null : (
-          /* Debug Info - Only show when activity log is closed */
-          <div className="fixed bottom-4 left-4 text-xs text-gray-500 space-y-1 bg-black/80 backdrop-blur-sm border border-gray-800 rounded-lg p-3 z-10">
-            <p>Contract: {LOGCHAIN_SINGLETON_ADDR}</p>
-            <p>Network: Base</p>
-            <p>Contract creation block: {CONTRACT_CREATION_BLOCK}</p>
-            <p>Status: {ready ? '🟢 Ready' : '🔴 Not Ready'} {(isInitialLoading || isLoadingMore) ? '⏳ Loading' : ''}</p>
-          </div>
-        )}
       </div>
     </div>
   );

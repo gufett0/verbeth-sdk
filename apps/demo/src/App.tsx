@@ -440,10 +440,10 @@ export default function App() {
   return (
     <div className="min-h-screen bg-black text-white">
       <div className="w-full bg-black">
-        <div className="flex justify-between items-start px-4 py-4">
+        <div className="flex justify-between items-start px-2 sm:px-4 py-2 sm:py-4">
           {/* LEFT: title */}
           <div className="flex flex-col items-start">
-            <h1 className="text-4xl font-extrabold leading-tight">
+            <h1 className="text-2xl sm:text-4xl font-extrabold leading-tight">
               Verbeth Chat
             </h1>
             <div className="text-xs text-gray-400 pl-0.5 mt-1">
@@ -451,26 +451,31 @@ export default function App() {
             </div>
           </div>
           {/* RIGHT: auth buttons */}
-          <div className="flex items-start gap-2">
+          <div className="flex items-start gap-px sm:gap-px">
             {!isConnected && !isBaseConnected ? (
-              <div className="flex flex-col items-end gap-px">
-                <SignInWithBaseButton
-                  align="center"
-                  variant="solid"
-                  colorScheme="system"
-                  onClick={connectBaseAccount}
-                />
-                <div className="text-xs text-gray-400 w-fit text-left self-start -ml-6">Or</div>
-                <div className="border border-gray-400 rounded-lg p-0.5 w-full flex justify-center">
+              <div className="flex flex-col items-end -space-y-1 sm:space-y-0 sm:gap-px">
+                <div className="scale-75 sm:scale-100 origin-top-right">
+                  <SignInWithBaseButton
+                    align="center"
+                    variant="solid"
+                    colorScheme="system"
+                    onClick={connectBaseAccount}
+                  />
+                </div>
+                <div className="text-xs text-gray-400 text-left w-fit self-start -ml-6 my-0 hidden sm:block">
+                  Or
+                </div>
+
+                <div className="border border-gray-400 rounded-lg p-0.5 w-full flex justify-center scale-75 sm:scale-100 origin-top-right">
                   <ConnectButton />
                 </div>
               </div>
             ) : isConnected ? (
-              <div className="border border-gray-600 rounded-lg p-0.5 w-full flex justify-center">
+              <div className="border border-gray-600 rounded-lg p-0.5 w-full flex justify-center scale-75 sm:scale-100 origin-top-right">
                 <ConnectButton />
               </div>
             ) : (
-              <div className="flex items-center gap-2 px-3 py-2 border border-gray-600 rounded-lg">
+              <div className="flex items-center gap-1 sm:gap-2 px-2 sm:px-3 py-1 sm:py-2 border border-gray-600 rounded-lg text-sm sm:text-base">
                 <span className="text-sm flex items-center gap-1">
                   {baseAddress?.slice(0, 8)}...{baseAddress?.slice(-6)}
                   <span title="Copia indirizzo">
@@ -499,123 +504,160 @@ export default function App() {
       </div>
 
       {/* Main content with max-width */}
-      <div className="max-w-6xl mx-auto pt-px px-4 pb-4 flex flex-col min-h-[80vh]">
-        <div className="flex-1 flex flex-col">
+      <div className="max-w-6xl mx-auto pt-px px-2 sm:px-4 pb-4 flex flex-col min-h-[80vh]">
+        <div className="flex-1 flex flex-col pb-32 sm:pb-24">
+          <div className="flex-1 flex flex-col">
 
-          {/* Handshake Toast Notifiche */}
-          <SideToastNotifications
-            notifications={handshakeToasts}
-            removeNotification={removeToast}
-          />
-
-          <CelebrationToast show={showToast} onClose={() => setShowToast(false)} />
-
-          {needsIdentityCreation ? (
-            <IdentityCreation
-              loading={loading}
-              onCreateIdentity={createIdentity}
-              address={address || baseAddress || "Not connected"}
+            {/* Handshake Toast Notifiche */}
+            <SideToastNotifications
+              notifications={handshakeToasts}
+              removeNotification={removeToast}
             />
-          ) : showHandshakeForm ? (
-            <InitialForm
-              isConnected={isConnected}
-              isBaseConnected={isBaseConnected}
-              loading={loading}
-              recipientAddress={recipientAddress}
-              setRecipientAddress={setRecipientAddress}
-              message={message}
-              setMessage={setMessage}
-              onSendHandshake={() => sendHandshake(recipientAddress, message)}
-              contactsLength={isConnected || isBaseConnected ? contacts.length : 0}
-              onBackToChats={isConnected || isBaseConnected && contacts.length > 0 ? () => setShowHandshakeForm(false) : undefined}
-              onConnectBase={connectBaseAccount}
-              hasExistingIdentity={!needsIdentityCreation}
-            />
-          ) : (
-            /* Main Chat Layout */
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Left Panel - Contacts */}
-              <div className="border border-gray-800 rounded-lg p-4">
-                <div className="flex justify-between items-center mb-4">
-                  <h2 className="text-lg font-semibold">Contacts</h2>
-                  <button
-                    onClick={() => setShowHandshakeForm(true)}
-                    className="text-sm px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded"
-                  >
-                    + New
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {contacts.map((contact) => (
-                    <div
-                      key={contact.address}
-                      onClick={() => setSelectedContact(contact)}
-                      className={`p-3 rounded cursor-pointer transition-colors ${selectedContact?.address === contact.address
-                        ? 'bg-blue-900'
-                        : 'bg-gray-900 hover:bg-gray-800'
-                        }`}
+
+            <CelebrationToast show={showToast} onClose={() => setShowToast(false)} />
+
+            {needsIdentityCreation ? (
+              <IdentityCreation
+                loading={loading}
+                onCreateIdentity={createIdentity}
+                address={address || baseAddress || "Not connected"}
+              />
+            ) : showHandshakeForm ? (
+              <InitialForm
+                isConnected={isConnected}
+                isBaseConnected={isBaseConnected}
+                loading={loading}
+                recipientAddress={recipientAddress}
+                setRecipientAddress={setRecipientAddress}
+                message={message}
+                setMessage={setMessage}
+                onSendHandshake={() => sendHandshake(recipientAddress, message)}
+                contactsLength={isConnected || isBaseConnected ? contacts.length : 0}
+                onBackToChats={isConnected || isBaseConnected && contacts.length > 0 ? () => setShowHandshakeForm(false) : undefined}
+                onConnectBase={connectBaseAccount}
+                hasExistingIdentity={!needsIdentityCreation}
+              />
+            ) : (
+              /* Main Chat Layout */
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Left Panel - Contacts */}
+                <div className="border border-gray-800 rounded-lg p-4">
+                  <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-lg font-semibold">Contacts</h2>
+                    <button
+                      onClick={() => setShowHandshakeForm(true)}
+                      className="text-sm px-3 py-1 bg-blue-600 hover:bg-blue-700 rounded"
                     >
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm font-medium">
-                          {contact.address.slice(0, 8)}...
-                        </span>
-                        <span className={`text-xs px-2 py-1 rounded ${contact.status === 'established'
-                          ? 'bg-green-800 text-green-200'
-                          : contact.status === 'handshake_sent'
-                            ? 'bg-yellow-800 text-yellow-200'
-                            : 'bg-gray-700 text-gray-300'
-                          }`}>
-                          {contact.status === 'established'
-                            ? 'connected'
+                      + New
+                    </button>
+                  </div>
+                  <div className="space-y-2">
+                    {contacts.map((contact) => (
+                      <div
+                        key={contact.address}
+                        onClick={() => setSelectedContact(contact)}
+                        className={`p-3 rounded cursor-pointer transition-colors ${selectedContact?.address === contact.address
+                          ? 'bg-blue-900'
+                          : 'bg-gray-900 hover:bg-gray-800'
+                          }`}
+                      >
+                        <div className="flex justify-between items-center">
+                          <span className="text-sm font-medium">
+                            {contact.address.slice(0, 8)}...
+                          </span>
+                          <span className={`text-xs px-2 py-1 rounded ${contact.status === 'established'
+                            ? 'bg-green-800 text-green-200'
                             : contact.status === 'handshake_sent'
-                              ? 'request sent'
-                              : contact.status.replace('_', ' ')}
-                        </span>
+                              ? 'bg-yellow-800 text-yellow-200'
+                              : 'bg-gray-700 text-gray-300'
+                            }`}>
+                            {contact.status === 'established'
+                              ? 'connected'
+                              : contact.status === 'handshake_sent'
+                                ? 'request sent'
+                                : contact.status.replace('_', ' ')}
+                          </span>
+                        </div>
+                        {contact.lastMessage && (
+                          <p className="text-xs text-gray-400 mt-1">
+                            "{contact.lastMessage.slice(0, 30)}..."
+                          </p>
+                        )}
                       </div>
-                      {contact.lastMessage && (
-                        <p className="text-xs text-gray-400 mt-1">
-                          "{contact.lastMessage.slice(0, 30)}..."
-                        </p>
-                      )}
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
 
-              {/* Right Panel - Conversation */}
-              <div className="lg:col-span-2 border border-gray-800 rounded-lg p-4 flex flex-col h-96">
-                <h2 className="text-lg font-semibold mb-4">
-                  {selectedContact ? `Chat with ${selectedContact.address.slice(0, 8)}...` : 'Select a contact'}
-                </h2>
+                {/* Right Panel - Conversation */}
+                <div className="lg:col-span-2 border border-gray-800 rounded-lg p-4 flex flex-col h-96">
+                  <h2 className="text-lg font-semibold mb-4">
+                    {selectedContact ? `Chat with ${selectedContact.address.slice(0, 8)}...` : 'Select a contact'}
+                  </h2>
 
-                {selectedContact ? (
-                  <>
-                    {/* Load More History Button */}
-                    {canLoadMore && (
-                      <div className="text-center mb-2">
-                        <button
-                          onClick={loadMoreHistory}
-                          disabled={isLoadingMore}
-                          className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded"
-                        >
-                          {isLoadingMore ? (
-                            <div className="flex items-center gap-2">
-                              <div className="animate-spin w-3 h-3 border border-gray-400 border-t-transparent rounded-full"></div>
-                              <span>Loading...</span>
-                              {syncProgress && <span>({syncProgress.current}/{syncProgress.total})</span>}
+                  {selectedContact ? (
+                    <>
+                      {/* Load More History Button */}
+                      {canLoadMore && (
+                        <div className="text-center mb-2">
+                          <button
+                            onClick={loadMoreHistory}
+                            disabled={isLoadingMore}
+                            className="px-3 py-1 text-sm bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded"
+                          >
+                            {isLoadingMore ? (
+                              <div className="flex items-center gap-2">
+                                <div className="animate-spin w-3 h-3 border border-gray-400 border-t-transparent rounded-full"></div>
+                                <span>Loading...</span>
+                                {syncProgress && <span>({syncProgress.current}/{syncProgress.total})</span>}
+                              </div>
+                            ) : (
+                              "Load More History"
+                            )}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Messages */}
+                      <div className="flex-1 overflow-y-auto space-y-2 mb-4">
+                        {messages
+                          .filter(m => {
+                            // without address o selectedContact, do not show messagges
+                            const currentAddress = address || baseAddress;
+                            if (!currentAddress || !selectedContact?.address) return false;
+                            const conversationTopic = generateConversationTopic(currentAddress, selectedContact.address);
+                            return (
+                              m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
+                              (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||
+                              m.topic === conversationTopic
+                            );
+                          })
+                          .sort((a, b) => a.timestamp - b.timestamp)
+                          .map((msg) => (
+                            <div
+                              key={msg.id}
+                              className={`p-2 rounded max-w-xs ${msg.direction === 'outgoing'
+                                ? 'bg-blue-600 ml-auto'
+                                : msg.direction === 'incoming'
+                                  ? 'bg-gray-700'
+                                  : 'bg-gray-700 mx-auto text-center text-xs'
+                                }`}
+                            >
+                              <p className="text-sm">{msg.decrypted || msg.ciphertext}</p>
+                              <div className="flex justify-between items-center mt-1">
+                                <span className="text-xs text-gray-300">
+                                  {new Date(msg.timestamp).toLocaleTimeString()}
+                                </span>
+                                {msg.direction === 'outgoing' && (
+                                  <span className="text-xs" title={`Status: ${msg.status}`}>
+                                    {msg.status === 'confirmed' ? '✓✓' :
+                                      msg.status === 'failed' ? '✗' :
+                                        msg.status === 'pending' ? '✓' : '?'}
+                                  </span>
+                                )}
+                              </div>
                             </div>
-                          ) : (
-                            "Load More History"
-                          )}
-                        </button>
-                      </div>
-                    )}
-
-                    {/* Messages */}
-                    <div className="flex-1 overflow-y-auto space-y-2 mb-4">
-                      {messages
-                        .filter(m => {
-                          // without address o selectedContact, do not show messagges
+                          ))}
+                        {messages.filter(m => {
                           const currentAddress = address || baseAddress;
                           if (!currentAddress || !selectedContact?.address) return false;
                           const conversationTopic = generateConversationTopic(currentAddress, selectedContact.address);
@@ -624,105 +666,69 @@ export default function App() {
                             (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||
                             m.topic === conversationTopic
                           );
-                        })
-                        .sort((a, b) => a.timestamp - b.timestamp)
-                        .map((msg) => (
-                          <div
-                            key={msg.id}
-                            className={`p-2 rounded max-w-xs ${msg.direction === 'outgoing'
-                              ? 'bg-blue-600 ml-auto'
-                              : msg.direction === 'incoming'
-                                ? 'bg-gray-700'
-                                : 'bg-gray-700 mx-auto text-center text-xs'
-                              }`}
+                        }).length === 0 && (
+                            <p className="text-gray-400 text-sm text-center py-8">
+                              No messages yet. {selectedContact.status === 'established' ? 'Start the conversation!' : 'Waiting for handshake completion.'}
+                            </p>
+                          )}
+                      </div>
+
+                      {/* Message Input */}
+                      {selectedContact.status === 'established' && selectedContact.identityPubKey && (
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            placeholder="Type a message..."
+                            className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded text-white"
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                                sendMessageToContact(selectedContact, e.currentTarget.value.trim());
+                                e.currentTarget.value = '';
+                              }
+                            }}
+                          />
+                          <button
+                            onClick={() => {
+                              const input = document.querySelector('input[placeholder="Type a message..."]') as HTMLInputElement;
+                              if (input?.value.trim()) {
+                                sendMessageToContact(selectedContact, input.value.trim());
+                                input.value = '';
+                              }
+                            }}
+                            disabled={loading}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 rounded"
                           >
-                            <p className="text-sm">{msg.decrypted || msg.ciphertext}</p>
-                            <div className="flex justify-between items-center mt-1">
-                              <span className="text-xs text-gray-300">
-                                {new Date(msg.timestamp).toLocaleTimeString()}
-                              </span>
-                              {msg.direction === 'outgoing' && (
-                                <span className="text-xs" title={`Status: ${msg.status}`}>
-                                  {msg.status === 'confirmed' ? '✓✓' :
-                                    msg.status === 'failed' ? '✗' :
-                                      msg.status === 'pending' ? '✓' : '?'}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        ))}
-                      {messages.filter(m => {
-                        const currentAddress = address || baseAddress;
-                        if (!currentAddress || !selectedContact?.address) return false;
-                        const conversationTopic = generateConversationTopic(currentAddress, selectedContact.address);
-                        return (
-                          m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
-                          (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||
-                          m.topic === conversationTopic
-                        );
-                      }).length === 0 && (
-                          <p className="text-gray-400 text-sm text-center py-8">
-                            No messages yet. {selectedContact.status === 'established' ? 'Start the conversation!' : 'Waiting for handshake completion.'}
-                          </p>
-                        )}
+                            Send
+                          </button>
+                        </div>
+                      )}
+
+                      {selectedContact.status !== 'established' && (
+                        <div className="text-center py-4 text-gray-400 text-sm">
+                          Handshake in progress... waiting for response
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex-1 flex items-center justify-center text-gray-400">
+                      Select a contact to start messaging
                     </div>
-
-                    {/* Message Input */}
-                    {selectedContact.status === 'established' && selectedContact.identityPubKey && (
-                      <div className="flex gap-2">
-                        <input
-                          type="text"
-                          placeholder="Type a message..."
-                          className="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded text-white"
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter' && e.currentTarget.value.trim()) {
-                              sendMessageToContact(selectedContact, e.currentTarget.value.trim());
-                              e.currentTarget.value = '';
-                            }
-                          }}
-                        />
-                        <button
-                          onClick={() => {
-                            const input = document.querySelector('input[placeholder="Type a message..."]') as HTMLInputElement;
-                            if (input?.value.trim()) {
-                              sendMessageToContact(selectedContact, input.value.trim());
-                              input.value = '';
-                            }
-                          }}
-                          disabled={loading}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 rounded"
-                        >
-                          Send
-                        </button>
-                      </div>
-                    )}
-
-                    {selectedContact.status !== 'established' && (
-                      <div className="text-center py-4 text-gray-400 text-sm">
-                        Handshake in progress... waiting for response
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="flex-1 flex items-center justify-center text-gray-400">
-                    Select a contact to start messaging
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
-          )}
-
+            )}
+          </div>
           {/* Activity Log + Debug Info */}
           {ready && (
-            <div className="fixed bottom-0 left-0 w-screen flex flex-col gap-2 px-2 sm:px-4 pb-4 z-30 pointer-events-none">
+            <div className="fixed bottom-0 left-0 w-screen flex flex-col gap-1 sm:gap-2 px-1 sm:px-2 md:px-4 pb-2 sm:pb-4 z-30 pointer-events-none">
               <div className="max-w-6xl w-full pointer-events-auto">
                 <div
-                  className="flex justify-between items-center p-4 cursor-pointer hover:bg-gray-900/50 transition-colors"
+                  className="flex justify-between items-center p-2 sm:p-4 cursor-pointer hover:bg-gray-900/50 transition-colors"
                   onClick={() => setIsActivityLogOpen(!isActivityLogOpen)}
                 >
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-lg font-semibold">Activity Log</h2>
+                  <div className="flex items-center gap-2 sm:gap-4">
+                    <div className="flex items-center gap-1 sm:gap-2">
+                      <h2 className="text-sm sm:text-lg font-semibold">Activity Log</h2>
                       <span className="text-gray-400 text-sm">
                         {isActivityLogOpen ? '▼' : '▶'}
                       </span>
@@ -778,7 +784,7 @@ export default function App() {
               </div>
 
               {!isActivityLogOpen && (
-                <div className="w-full bg-black/80 backdrop-blur-sm p-3 text-xs text-gray-500 space-y-1 h-fit">
+                <div className="w-full bg-black/80 backdrop-blur-sm p-2 sm:p-3 text-xs text-gray-500 space-y-1 h-fit">
                   <p>Contract: {LOGCHAIN_SINGLETON_ADDR}</p>
                   <p>Network: Base</p>
                   <p>Contract creation block: {CONTRACT_CREATION_BLOCK}</p>

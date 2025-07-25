@@ -11,17 +11,18 @@
   "type": "module",
   "types": "dist/src/index.d.ts",
   "dependencies": {
-    "ethers": "^6.7.0",
-    "tweetnacl": "^1.0.3",
     "@noble/curves": "^1.8.1",
+    "@noble/hashes": "^1.8.0",
     "@noble/secp256k1": "^2.2.3",
-    "@verbeth/contracts": "workspace:^0.1.0"
+    "@verbeth/contracts": "workspace:^0.1.0",
+    "ethers": "^6.7.0",
+    "tweetnacl": "^1.0.3"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
+    "ts-node": "^10.9.2",
     "typechain": "^8.3.2",
-    "vitest": "^3.1.4",
-    "ts-node": "^10.9.2"
+    "typescript": "^5.4.0",
+    "vitest": "^3.1.4"
   },
   "scripts": {
     "build:cjs": "tsc --project tsconfig.json",

@@ -39,14 +39,12 @@ export const useMessageProcessor = ({
   identityKeyPair,
   onLog,
 }: UseMessageProcessorProps): MessageProcessorResult => {
-  // State
   const [messages, setMessages] = useState<Message[]>([]);
   const [pendingHandshakes, setPendingHandshakes] = useState<
     PendingHandshake[]
   >([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
 
-  // Helper functions
   const hexToUint8Array = (hex: string): Uint8Array => {
     const cleanHex = hex.replace("0x", "");
     return new Uint8Array(
@@ -58,7 +56,6 @@ export const useMessageProcessor = ({
     txHash: string,
     log: { logIndex?: number; index?: number }
   ): string => {
-    // Preferisci log.logIndex, poi log.index, infine 0
     const idx =
       typeof log.logIndex !== "undefined"
         ? log.logIndex
@@ -184,17 +181,14 @@ export const useMessageProcessor = ({
           verified: isVerified,
         };
 
-        // Save to database
         await dbService.savePendingHandshake(pendingHandshake);
 
-        // Update state
         setPendingHandshakes((prev) => {
           const existing = prev.find((h) => h.id === pendingHandshake.id);
           if (existing) return prev;
           return [...prev, pendingHandshake];
         });
 
-        // Add handshake received message to chat
         const conversationTopic = generateConversationTopic(
           address,
           cleanSenderAddress
@@ -233,7 +227,7 @@ export const useMessageProcessor = ({
     [address, readProvider, onLog]
   );
 
-  // ✅ FIXED: Process handshake response log - load contacts from DB
+  // Process handshake response log - load contacts from DB
   const processHandshakeResponseLog = useCallback(
     async (event: ProcessedEvent): Promise<void> => {
       if (!address || !readProvider) return;
@@ -249,7 +243,7 @@ export const useMessageProcessor = ({
         const responder = "0x" + log.topics[2].slice(-40);
         const inResponseTo = log.topics[1];
 
-        // ✅ FIXED: Load fresh contacts from database instead of using stale parameter
+        // Load fresh contacts from database instead of using stale parameter
         const currentContacts = await dbService.getAllContacts(address);
         onLog(
           `🔍 Debug: Loaded ${currentContacts.length} contacts from DB for handshake response`
@@ -323,7 +317,6 @@ export const useMessageProcessor = ({
           lastTimestamp: Date.now(),
         };
 
-        // Save to database
         await dbService.saveContact(updatedContact);
 
         // Update state
@@ -372,7 +365,7 @@ export const useMessageProcessor = ({
     [address, readProvider, onLog]
   );
 
-  // ✅ FIXED: Process message log - load contacts from DB and update lastMessage
+  // Process message log - load contacts from DB and update lastMessage
   const processMessageLog = useCallback(
     async (event: ProcessedEvent): Promise<void> => {
       if (!address || !identityKeyPair) return;
@@ -622,7 +615,6 @@ export const useMessageProcessor = ({
     [address]
   );
 
-  // Clear state when address changes
   useEffect(() => {
     if (address) {
       setMessages([]);

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { CheckIcon, XIcon } from "lucide-react";
+import { CopyIcon } from "lucide-react";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useWalletClient } from 'wagmi';
 import { useRpcProvider } from './rpc.js';
@@ -8,17 +8,12 @@ import {
   LogChainV1__factory,
   type LogChainV1,
 } from "@verbeth/contracts/typechain-types/index.js";
-import nacl from "tweetnacl";
 import {
-  sendEncryptedMessage,
-  initiateHandshake,
-  respondToHandshake,
   IExecutor,
   ExecutorFactory,
   deriveIdentityKeyPairWithProof,
   IdentityKeyPair,
   DerivationProof,
-  getNextNonce
 } from '@verbeth/sdk';
 import { useMessageListener } from './hooks/useMessageListener.js';
 import { useMessageProcessor } from './hooks/useMessageProcessor.js';
@@ -28,12 +23,15 @@ import {
   CONTRACT_CREATION_BLOCK,
   Contact,
   StoredIdentity,
-  generateConversationTopic, generateTempMessageId
+  generateConversationTopic,
 } from './types.js';
 import { InitialForm } from './components/InitialForm.js';
 import { SideToastNotifications } from './components/SideToastNotification.js';
 import { IdentityCreation } from './components/IdentityCreation.js';
 import { CelebrationToast } from "./components/CelebrationToast.js";
+import { createBaseAccountSDK } from '@base-org/account';
+import { SignInWithBaseButton } from '@base-org/account-ui/react';
+import { useChatActions } from './hooks/useChatActions.js';
 
 
 export default function App() {
@@ -41,7 +39,6 @@ export default function App() {
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
 
-  // State
   const [ready, setReady] = useState(false);
   const [recipientAddress, setRecipientAddress] = useState("");
   const [message, setMessage] = useState("");
@@ -61,9 +58,12 @@ export default function App() {
   const [isActivityLogOpen, setIsActivityLogOpen] = useState(false);
   const [activityLogs, setActivityLogs] = useState<string>("");
 
-  // Refs for logging
+  const [baseSDK, setBaseSDK] = useState<ReturnType<typeof createBaseAccountSDK> | null>(null);
+  const [baseProvider, setBaseProvider] = useState<any>(null);
+  const [baseAddress, setBaseAddress] = useState<string | null>(null);
+  const [isBaseConnected, setIsBaseConnected] = useState(false);
+
   const logRef = useRef<HTMLTextAreaElement>(null);
-  //const sdk = useRef<ReturnType<typeof createBaseAccountSDK>>();
 
   const addLog = useCallback((message: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -72,7 +72,6 @@ export default function App() {
     setActivityLogs(prev => {
       const newLogs = prev + logEntry;
 
-      // Auto-scroll if textarea is available and accordion is open
       setTimeout(() => {
         if (logRef.current && isActivityLogOpen) {
           logRef.current.scrollTop = logRef.current.scrollHeight;
@@ -85,42 +84,89 @@ export default function App() {
 
 
   const createIdentity = useCallback(async () => {
-    if (!signer || !address) {
-      addLog("✗ Missing signer or address for identity creation");
+    // Wagmi
+    if (signer && address) {
+      setLoading(true);
+      try {
+        addLog("Deriving new identity key (EOA)...");
+
+        const result = await deriveIdentityKeyPairWithProof(signer, address);
+
+        setIdentityKeyPair(result.keyPair);
+        setDerivationProof(result.derivationProof);
+
+        const identityToStore: StoredIdentity = {
+          address: address,
+          keyPair: result.keyPair,
+          derivedAt: Date.now(),
+          proof: result.derivationProof
+        };
+
+        await dbService.saveIdentity(identityToStore);
+        addLog(`New identity key derived and saved for EOA`);
+        setNeedsIdentityCreation(false);
+        setShowToast(true);
+
+      } catch (signError: any) {
+        if (signError.code === 4001) {
+          addLog("User rejected signing request.");
+        } else {
+          addLog(`✗ Failed to derive identity: ${signError.message}`);
+        }
+      } finally {
+        setLoading(false);
+      }
       return;
     }
 
-    setLoading(true);
-    try {
-      addLog("Deriving new identity key...");
+    // Base SDK
+    if (baseProvider && baseAddress) {
+      setLoading(true);
+      try {
+        addLog("Deriving new identity key (Base Smart Account)...");
 
-      const result = await deriveIdentityKeyPairWithProof(signer, address);
+        // mock signer 
+        const baseSigner = {
+          signMessage: async (message: string) => {
+            return await baseProvider.request({
+              method: 'personal_sign',
+              params: [message, baseAddress]
+            });
+          },
+          getAddress: () => baseAddress
+        };
 
-      setIdentityKeyPair(result.keyPair);
-      setDerivationProof(result.derivationProof);
+        const result = await deriveIdentityKeyPairWithProof(baseSigner as any, baseAddress);
 
-      const identityToStore: StoredIdentity = {
-        address: address,
-        keyPair: result.keyPair,
-        derivedAt: Date.now(),
-        proof: result.derivationProof
-      };
+        setIdentityKeyPair(result.keyPair);
+        setDerivationProof(result.derivationProof);
 
-      await dbService.saveIdentity(identityToStore);
-      console.log(`New identity key derived and saved`);
-      setNeedsIdentityCreation(false);
-      setShowToast(true);
+        const identityToStore: StoredIdentity = {
+          address: baseAddress,
+          keyPair: result.keyPair,
+          derivedAt: Date.now(),
+          proof: result.derivationProof
+        };
 
-    } catch (signError: any) {
-      if (signError.code === 4001) {
-        console.log("User rejected signing request.");
-      } else {
-        console.log(`✗ Failed to derive identity: ${signError.message}`);
+        await dbService.saveIdentity(identityToStore);
+        addLog(`New identity key derived and saved for Base Smart Account`);
+        setNeedsIdentityCreation(false);
+        setShowToast(true);
+
+      } catch (signError: any) {
+        if (signError.code === 4001) {
+          addLog("User rejected signing request.");
+        } else {
+          addLog(`✗ Failed to derive identity: ${signError.message}`);
+        }
+      } finally {
+        setLoading(false);
       }
-    } finally {
-      setLoading(false);
+      return;
     }
-  }, [signer, address, addLog]);
+
+    addLog("✗ Missing signer/provider or address for identity creation");
+  }, [signer, address, baseProvider, baseAddress, addLog]);
 
   const {
     messages,
@@ -132,7 +178,7 @@ export default function App() {
     processEvents
   } = useMessageProcessor({
     readProvider,
-    address,
+    address: address ?? baseAddress ?? undefined,
     identityKeyPair,
     onLog: addLog
   });
@@ -145,18 +191,43 @@ export default function App() {
     loadMoreHistory,
   } = useMessageListener({
     readProvider,
-    address,
+    address: address ?? baseAddress ?? undefined,
     onLog: addLog,
     onEventsProcessed: processEvents
   });
 
+  const {
+    sendHandshake,
+    acceptHandshake,
+    sendMessageToContact
+  } = useChatActions({
+    address,
+    baseAddress,
+    baseProvider,
+    signer,
+    executor,
+    identityKeyPair,
+    derivationProof,
+    addLog,
+    updateContact: async (contact: Contact) => { await updateContact(contact); },
+    addMessage: async (message: any) => { await addMessage(message); },
+    removePendingHandshake: async (id: string) => { await removePendingHandshake(id); },
+    setSelectedContact,
+    setLoading,
+    setMessage,
+    setRecipientAddress,
+  });
+
   // sync handshakeToasts
   useEffect(() => {
-    if (!isConnected || !address) {
+    const currentlyConnected = isConnected || isBaseConnected;
+    const currentAddress = address || baseAddress;
+
+    if (!currentlyConnected || !currentAddress) {
       setHandshakeToasts([]);
       return;
     }
-    // maps pendingHandshakes in notifiche toast
+
     setHandshakeToasts(
       pendingHandshakes.map((h) => ({
         id: h.id,
@@ -167,15 +238,18 @@ export default function App() {
         onReject: () => removePendingHandshake(h.id),
       }))
     );
-  }, [pendingHandshakes, isConnected, address]);
+  }, [pendingHandshakes, isConnected, isBaseConnected, address, baseAddress]);
 
   const removeToast = (id: string) => {
     setHandshakeToasts((prev) => prev.filter((n) => n.id !== id));
   };
 
   useEffect(() => {
-    setReady(readProvider !== null && isConnected && walletClient !== undefined);
-  }, [readProvider, isConnected, walletClient]);
+    setReady(
+      (readProvider !== null && isConnected && walletClient !== undefined) ||
+      (baseProvider !== null && isBaseConnected)
+    );
+  }, [readProvider, isConnected, walletClient, baseProvider, isBaseConnected]);
 
   useEffect(() => {
     handleInitialization();
@@ -183,336 +257,249 @@ export default function App() {
 
   // hide handshake form when we have contacts AND user is connected
   useEffect(() => {
-    setShowHandshakeForm(!ready || !isConnected || contacts.length === 0 || needsIdentityCreation);
-  }, [ready, isConnected, contacts.length, needsIdentityCreation]);
+    const currentlyConnected = isConnected || isBaseConnected;
+    setShowHandshakeForm(!ready || !currentlyConnected || contacts.length === 0 || needsIdentityCreation);
+  }, [ready, isConnected, isBaseConnected, contacts.length, needsIdentityCreation]);
 
   const handleInitialization = useCallback(async () => {
     try {
-      if (!ready || !readProvider || !walletClient || !address) {
-        setCurrentAccount(null);
-        setIdentityKeyPair(null);
-        setDerivationProof(null);
-        setSelectedContact(null);
-        setSigner(null);
-        setContract(null);
-        setExecutor(null);
-        setNeedsIdentityCreation(false);
+      if (ready && readProvider && walletClient && address && !baseAddress) {
+        await initializeWagmiAccount();
         return;
       }
 
-      console.log(`...Initializing for account: ${address.slice(0, 8)}...`);
-
-      // get current provider from wagmi
-      const ethersProvider = new BrowserProvider(walletClient.transport);
-      const ethersSigner = await ethersProvider.getSigner();
-
-      let isBaseSmartAccount = false;
-      let publicIdentity = address;
-      let executorInstance: IExecutor;
-      const paymasterUrl = import.meta.env.VITE_PAYMASTER_AND_BUNDLER_ENDPOINT;
-
-      try {
-        // test if wallet smart account features
-        const capabilities = await walletClient.transport.request({
-          method: 'wallet_getCapabilities',
-          params: [address]
-        }).catch(() => null);
-
-        const hasSmartAccountFeatures = capabilities &&
-          Object.values(capabilities).some((chainCaps: any) =>
-            chainCaps?.paymasterService || chainCaps?.atomicBatch
-          );
-
-        if (hasSmartAccountFeatures) {
-          isBaseSmartAccount = true;
-          executorInstance = ExecutorFactory.createBaseSmartAccount(
-            walletClient.transport,
-            LOGCHAIN_SINGLETON_ADDR,
-            8453,
-            paymasterUrl
-          );
-
-          if (paymasterUrl) {
-            console.log(`Smart Account with gas sponsorship detected: ${address.slice(0, 8)}...`);
-          } else {
-            console.log(`Smart Account detected: ${address.slice(0, 8)}...`);
-          }
-        } else {
-          // fallback to EOA
-          const contractInstance = LogChainV1__factory.connect(LOGCHAIN_SINGLETON_ADDR, ethersSigner as any);
-          executorInstance = ExecutorFactory.createEOA(contractInstance);
-          setContract(contractInstance);
-          console.log(`Using EOA mode: ${address.slice(0, 8)}...`);
-        }
-      } catch (error) {
-        const contractInstance = LogChainV1__factory.connect(LOGCHAIN_SINGLETON_ADDR, ethersSigner as any);
-        executorInstance = ExecutorFactory.createEOA(contractInstance);
-        setContract(contractInstance);
-        console.log(`Capability check failed, using EOA mode: ${address.slice(0, 8)}...`);
+      if (isBaseConnected && baseProvider && baseAddress && !address) {
+        await initializeBaseAccount();
+        return;
       }
 
-      setSigner(ethersSigner);
-      setExecutor(executorInstance);
-
-      if (publicIdentity !== currentAccount) {
-        console.log(`Account ${currentAccount ? 'changed' : 'connected'}: ${publicIdentity.slice(0, 8)}...${isBaseSmartAccount ? ' (Smart Account)' : ' (EOA)'}`);
-
-        setIdentityKeyPair(null);
-        setDerivationProof(null);
-        setSelectedContact(null);
-
-        await dbService.switchAccount(publicIdentity);
-        setCurrentAccount(publicIdentity);
+      if (!address && !baseAddress) {
+        resetState();
       }
-
-      console.log(`Loading identity for ${publicIdentity.slice(0, 8)}...`);
-
-      const storedIdentity = await dbService.getIdentity(publicIdentity);
-
-      if (storedIdentity) {
-        setIdentityKeyPair(storedIdentity.keyPair);
-        setDerivationProof(storedIdentity.proof ?? null);
-        setNeedsIdentityCreation(false);
-        addLog(`Identity keys restored from database`);
-      } else {
-        console.log(`No identity found for ${publicIdentity.slice(0, 8)}...`);
-        setNeedsIdentityCreation(true);
-      }
-
-      const sponsorshipStatus = isBaseSmartAccount && paymasterUrl ? ' with gas sponsorship' : '';
-      console.log(`Initialization complete - Mode: ${isBaseSmartAccount ? 'Smart Account' : 'EOA'}${sponsorshipStatus}`);
-
     } catch (error) {
       console.error("Failed to initialize:", error);
-      console.log(`✗ Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      addLog(`✗ Failed to initialize: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
-  }, [ready, readProvider, walletClient, address, currentAccount, addLog]);
+  }, [ready, readProvider, walletClient, address, baseAddress, isBaseConnected, baseProvider]);
 
-  // Send handshake
-  const sendHandshake = async () => {
-    if (!executor || !address || !recipientAddress || !message || !identityKeyPair || !derivationProof || !signer) {
-      addLog("✗ Missing required data for handshake");
-      return;
-    }
+  const initializeWagmiAccount = async () => {
+    const ethersProvider = new BrowserProvider(walletClient!.transport);
+    const ethersSigner = await ethersProvider.getSigner();
 
-    setLoading(true);
-    try {
-      const ephemeralKeyPair = nacl.box.keyPair();
+    const contractInstance = LogChainV1__factory.connect(LOGCHAIN_SINGLETON_ADDR, ethersSigner as any);
+    const executorInstance = ExecutorFactory.createEOA(contractInstance);
 
-      const tx = await initiateHandshake({
-        executor,
-        recipientAddress,
-        identityKeyPair,
-        ephemeralPubKey: ephemeralKeyPair.publicKey,
-        plaintextPayload: message,
-        derivationProof,
-        signer
-      });
+    setSigner(ethersSigner);
+    setExecutor(executorInstance);
+    setContract(contractInstance);
 
-      const newContact: Contact = {
-        address: recipientAddress,
-        ownerAddress: address,
-        status: 'handshake_sent',
-        ephemeralKey: ephemeralKeyPair.secretKey,
-        topic: tx.hash,
-        lastMessage: message,
-        lastTimestamp: Date.now()
-      };
-
-      // Save to database
-      await updateContact(newContact);
-
-      // Auto-select the new contact and add handshake message to chat
-      setSelectedContact(newContact);
-
-      // Add handshake message as system message in chat
-      const handshakeMessage = {
-        id: generateTempMessageId(),
-        topic: generateConversationTopic(address, recipientAddress),
-        sender: address,
-        recipient: recipientAddress,
-        ciphertext: '',
-        timestamp: Date.now(),
-        blockTimestamp: Date.now(),
-        blockNumber: 0,
-        direction: 'outgoing' as const,
-        decrypted: `Request: "${message}"`,
-        read: true,
-        nonce: 0,
-        dedupKey: `handshake-${tx.hash}`,
-        type: 'system' as const,
-        ownerAddress: address,
-        status: 'pending' as const
-      };
-
-      await addMessage(handshakeMessage);
-
-      addLog(`Handshake sent to ${recipientAddress.slice(0, 8)}...: "${message}" (tx: ${tx.hash})`);
-      setMessage("");
-      setRecipientAddress("");
-    } catch (error) {
-      console.error("Failed to send handshake:", error);
-      addLog(`✗ Failed to send handshake: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setLoading(false);
+    if (address !== currentAccount) {
+      console.log(`EOA connected: ${address!.slice(0, 8)}...`);
+      await switchToAccount(address!);
     }
   };
 
-  // Accept handshake
-  const acceptHandshake = async (handshake: any, responseMessage: string) => {
-    if (!executor || !address || !identityKeyPair || !derivationProof || !signer) {
-      addLog("✗ Missing required data for handshake response");
+  const initializeBaseAccount = async () => {
+    const paymasterUrl = import.meta.env.VITE_PAYMASTER_AND_BUNDLER_ENDPOINT;
+
+    const executorInstance = ExecutorFactory.createBaseSmartAccount(
+      baseProvider,
+      LOGCHAIN_SINGLETON_ADDR,
+      8453,
+      paymasterUrl
+    );
+
+    const mockSigner = {
+      signMessage: async (message: string) => {
+        return baseProvider.request({
+          method: 'personal_sign',
+          params: [message, baseAddress]
+        });
+      },
+      getAddress: () => baseAddress!
+    };
+
+    setSigner(mockSigner);
+    setExecutor(executorInstance);
+
+    if (baseAddress !== currentAccount) {
+      console.log(`Base Smart Account connected: ${baseAddress!.slice(0, 8)}...`);
+      await switchToAccount(baseAddress!);
+    }
+  };
+
+  const switchToAccount = async (newAddress: string) => {
+    setIdentityKeyPair(null);
+    setDerivationProof(null);
+    setSelectedContact(null);
+
+    await dbService.switchAccount(newAddress);
+    setCurrentAccount(newAddress);
+
+    const storedIdentity = await dbService.getIdentity(newAddress);
+    if (storedIdentity) {
+      setIdentityKeyPair(storedIdentity.keyPair);
+      setDerivationProof(storedIdentity.proof ?? null);
+      setNeedsIdentityCreation(false);
+      addLog(`Identity keys restored from database`);
+    } else {
+      setNeedsIdentityCreation(true);
+    }
+  };
+
+  const resetState = () => {
+    setCurrentAccount(null);
+    setIdentityKeyPair(null);
+    setDerivationProof(null);
+    setSelectedContact(null);
+    setSigner(null);
+    setContract(null);
+    setExecutor(null);
+    setNeedsIdentityCreation(false);
+  };
+
+  const initializeBaseSDK = useCallback(() => {
+    if (!baseSDK) {
+      const sdk = createBaseAccountSDK({
+        appName: 'Verbeth Chat',
+        //appLogoUrl: 'https://base.org/logo.png',
+        appChainIds: [8453],
+      });
+
+      const provider = sdk.getProvider();
+      setBaseSDK(sdk);
+      setBaseProvider(provider);
+
+      // Listen for account changes
+      provider.on('accountsChanged', (accounts: string[]) => {
+        if (accounts.length > 0) {
+          const newAddress = accounts[0];
+
+          if (baseAddress && newAddress !== baseAddress) {
+            addLog(`Base Account changed from ${baseAddress.slice(0, 8)}... to ${newAddress.slice(0, 8)}...`);
+            resetState();
+          }
+
+          setBaseAddress(newAddress);
+          setIsBaseConnected(true);
+        } else {
+          addLog("Base Account disconnected");
+          setBaseAddress(null);
+          setIsBaseConnected(false);
+          resetState();
+        }
+      });
+
+      provider.on('disconnect', () => {
+        addLog("Base Account provider disconnected");
+        setBaseAddress(null);
+        setIsBaseConnected(false);
+        resetState();
+      });
+    }
+  }, [baseSDK, baseAddress, addLog]);
+
+  const connectBaseAccount = async () => {
+    if (!baseProvider) {
+      initializeBaseSDK();
       return;
     }
 
     try {
-      const tx = await respondToHandshake({
-        executor,
-        inResponseTo: handshake.id,
-        initiatorPubKey: handshake.ephemeralPubKey,
-        responderIdentityKeyPair: identityKeyPair,
-        note: responseMessage,
-        derivationProof,
-        signer
+      const accounts = await baseProvider.request({
+        method: 'eth_requestAccounts',
+        params: []
       });
 
-      const newContact: Contact = {
-        address: handshake.sender,
-        ownerAddress: address,
-        status: 'established',
-        identityPubKey: handshake.identityPubKey,
-        signingPubKey: handshake.signingPubKey,
-        lastMessage: responseMessage,
-        lastTimestamp: Date.now()
-      };
-
-      await updateContact(newContact);
-      await removePendingHandshake(handshake.id);
-
-      // Auto-select the new contact
-      setSelectedContact(newContact);
-
-      // Add handshake acceptance message to chat
-      const conversationTopic = generateConversationTopic(address, handshake.sender);
-      const acceptanceMessage = {
-        id: generateTempMessageId(),
-        topic: conversationTopic,
-        sender: address,
-        recipient: handshake.sender,
-        ciphertext: '',
-        timestamp: Date.now(),
-        blockTimestamp: Date.now(),
-        blockNumber: 0,
-        direction: 'outgoing' as const,
-        decrypted: `Request accepted: "${responseMessage}"`,
-        read: true,
-        nonce: 0,
-        dedupKey: `handshake-accepted-${handshake.id}`,
-        type: 'system' as const,
-        ownerAddress: address,
-        status: 'pending' as const
-      };
-
-      await addMessage(acceptanceMessage);
-
-
-      addLog(`✅ Handshake accepted from ${handshake.sender.slice(0, 8)}...: "${responseMessage}"`);
+      if (accounts.length > 0) {
+        setBaseAddress(accounts[0]);
+        setIsBaseConnected(true);
+      }
     } catch (error) {
-      console.error("Failed to accept handshake:", error);
-      addLog(`✗ Failed to accept handshake: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      console.error('Base account connection failed:', error);
     }
   };
 
-  // Send message to established contact
-  const sendMessageToContact = async (contact: Contact, messageText: string) => {
-    if (!executor || !address || !contact.identityPubKey || !identityKeyPair) {
-      addLog("✗ Contact not established or missing data");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      // Generate consistent topic for this conversation
-      const topic = generateConversationTopic(address, contact.address);
-      const timestamp = Math.floor(Date.now() / 1000);
-      const identityAsSigningKey = {
-        publicKey: identityKeyPair.signingPublicKey,
-        secretKey: identityKeyPair.signingSecretKey
-      };
-
-      const expectedNonce = Number(getNextNonce(address, topic)) + 1;
-
-      // Create and save the pending message BEFORE sending
-      const pendingMessage = {
-        id: generateTempMessageId(),
-        topic,
-        sender: address,
-        recipient: contact.address,
-        ciphertext: '',
-        timestamp: timestamp * 1000,
-        blockTimestamp: Date.now(),
-        blockNumber: 0,
-        direction: 'outgoing' as const,
-        decrypted: messageText,
-        read: true,
-        nonce: expectedNonce,
-        dedupKey: `${address}:${topic}:${expectedNonce}`,
-        type: 'text' as const,
-        ownerAddress: address,
-        status: 'pending' as const
-      };
-
-      // Save to database immediately with pending status
-      await addMessage(pendingMessage);
-
-      // Send the actual transaction
-      await sendEncryptedMessage({
-        executor,
-        topic,
-        message: messageText,
-        recipientPubKey: contact.identityPubKey,
-        senderAddress: address,
-        senderSignKeyPair: identityAsSigningKey,
-        timestamp
+  const disconnectBaseAccount = () => {
+    if (baseProvider) {
+      baseProvider.disconnect?.().catch((error: any) => {
+        console.log(`Disconnect error: ${error.message}`);
       });
-
-      // Update contact's lastMessage and lastTimestamp
-      const updatedContact: Contact = {
-        ...contact,
-        lastMessage: messageText,
-        lastTimestamp: Date.now()
-      };
-      await updateContact(updatedContact);
-
-      addLog(`Message sent to ${contact.address.slice(0, 8)}...: "${messageText}"`);
-    } catch (error) {
-      console.error("Failed to send message:", error);
-      addLog(`✗ Failed to send message: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    } finally {
-      setLoading(false);
     }
+    setBaseAddress(null);
+    setIsBaseConnected(false);
+    resetState();
+    addLog("Base Account disconnected - state reset");
+    //localStorage.removeItem("base-acc-sdk.store");
   };
+
+  useEffect(() => {
+    initializeBaseSDK();
+  }, [initializeBaseSDK]);
 
   return (
     <div className="min-h-screen bg-black text-white">
-      <div className="w-full border-b border-gray-800 bg-black">
-        <div className="flex justify-between items-center px-4 py-4">
-          <div>
-            <h1 className="text-2xl font-bold leading-tight">
+      <div className="w-full bg-black">
+        <div className="flex justify-between items-start px-4 py-4">
+          {/* LEFT: title */}
+          <div className="flex flex-col items-start">
+            <h1 className="text-4xl font-extrabold leading-tight">
               Verbeth Chat
             </h1>
             <div className="text-xs text-gray-400 pl-0.5 mt-1">
               powered by Base
             </div>
           </div>
-          <div className={!isConnected ? "border border-gray-600 rounded-lg p-0.5" : ""}>
-            <ConnectButton />
+          {/* RIGHT: auth buttons */}
+          <div className="flex items-start gap-2">
+            {!isConnected && !isBaseConnected ? (
+              <div className="flex flex-col items-end gap-px">
+                <SignInWithBaseButton
+                  align="center"
+                  variant="solid"
+                  colorScheme="system"
+                  onClick={connectBaseAccount}
+                />
+                <div className="text-xs text-gray-400 w-fit text-left self-start -ml-6">Or</div>
+                <div className="border border-gray-400 rounded-lg p-0.5 w-full flex justify-center">
+                  <ConnectButton />
+                </div>
+              </div>
+            ) : isConnected ? (
+              <div className="border border-gray-600 rounded-lg p-0.5 w-full flex justify-center">
+                <ConnectButton />
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 px-3 py-2 border border-gray-600 rounded-lg">
+                <span className="text-sm flex items-center gap-1">
+                  {baseAddress?.slice(0, 8)}...{baseAddress?.slice(-6)}
+                  <span title="Copia indirizzo">
+                    <CopyIcon
+                      size={16}
+                      className="
+      ml-1 text-gray-400 hover:text-white cursor-pointer transition 
+      active:scale-90 hover:scale-110
+    "
+                      onClick={async () => {
+                        if (baseAddress) { await navigator.clipboard.writeText(baseAddress); }
+                      }}
+                    />
+                  </span>
+                </span>
+                <button
+                  onClick={disconnectBaseAccount}
+                  className="text-xs text-gray-400 hover:text-white"
+                >
+                  Sign out
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
 
       {/* Main content with max-width */}
-      <div className="max-w-6xl mx-auto p-4 flex flex-col min-h-[80vh]">
+      <div className="max-w-6xl mx-auto pt-px px-4 pb-4 flex flex-col min-h-[80vh]">
         <div className="flex-1 flex flex-col">
 
           {/* Handshake Toast Notifiche */}
@@ -527,19 +514,22 @@ export default function App() {
             <IdentityCreation
               loading={loading}
               onCreateIdentity={createIdentity}
-              address={address!}
+              address={address || baseAddress || "Not connected"}
             />
           ) : showHandshakeForm ? (
             <InitialForm
               isConnected={isConnected}
+              isBaseConnected={isBaseConnected}
               loading={loading}
               recipientAddress={recipientAddress}
               setRecipientAddress={setRecipientAddress}
               message={message}
               setMessage={setMessage}
-              onSendHandshake={sendHandshake}
-              contactsLength={isConnected ? contacts.length : 0}
-              onBackToChats={isConnected && contacts.length > 0 ? () => setShowHandshakeForm(false) : undefined}
+              onSendHandshake={() => sendHandshake(recipientAddress, message)}
+              contactsLength={isConnected || isBaseConnected ? contacts.length : 0}
+              onBackToChats={isConnected || isBaseConnected && contacts.length > 0 ? () => setShowHandshakeForm(false) : undefined}
+              onConnectBase={connectBaseAccount}
+              hasExistingIdentity={!needsIdentityCreation}
             />
           ) : (
             /* Main Chat Layout */
@@ -570,10 +560,10 @@ export default function App() {
                           {contact.address.slice(0, 8)}...
                         </span>
                         <span className={`text-xs px-2 py-1 rounded ${contact.status === 'established'
-                            ? 'bg-green-800 text-green-200'
-                            : contact.status === 'handshake_sent'
-                              ? 'bg-yellow-800 text-yellow-200'
-                              : 'bg-gray-700 text-gray-300'
+                          ? 'bg-green-800 text-green-200'
+                          : contact.status === 'handshake_sent'
+                            ? 'bg-yellow-800 text-yellow-200'
+                            : 'bg-gray-700 text-gray-300'
                           }`}>
                           {contact.status === 'established'
                             ? 'connected'
@@ -592,7 +582,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Right Panel - Conversation (spans 2 columns) */}
+              {/* Right Panel - Conversation */}
               <div className="lg:col-span-2 border border-gray-800 rounded-lg p-4 flex flex-col h-96">
                 <h2 className="text-lg font-semibold mb-4">
                   {selectedContact ? `Chat with ${selectedContact.address.slice(0, 8)}...` : 'Select a contact'}
@@ -625,9 +615,10 @@ export default function App() {
                     <div className="flex-1 overflow-y-auto space-y-2 mb-4">
                       {messages
                         .filter(m => {
-                          // Controllo di sicurezza: se non abbiamo address o selectedContact, non mostrare messaggi
-                          if (!address || !selectedContact?.address) return false;
-                          const conversationTopic = generateConversationTopic(address, selectedContact.address);
+                          // without address o selectedContact, do not show messagges
+                          const currentAddress = address || baseAddress;
+                          if (!currentAddress || !selectedContact?.address) return false;
+                          const conversationTopic = generateConversationTopic(currentAddress, selectedContact.address);
                           return (
                             m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
                             (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||
@@ -661,9 +652,9 @@ export default function App() {
                           </div>
                         ))}
                       {messages.filter(m => {
-                        // Controllo di sicurezza: se non abbiamo address o selectedContact, return false
-                        if (!address || !selectedContact?.address) return false;
-                        const conversationTopic = generateConversationTopic(address, selectedContact.address);
+                        const currentAddress = address || baseAddress;
+                        if (!currentAddress || !selectedContact?.address) return false;
+                        const conversationTopic = generateConversationTopic(currentAddress, selectedContact.address);
                         return (
                           m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
                           (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||
@@ -786,7 +777,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Debug Info */}
               {!isActivityLogOpen && (
                 <div className="w-full bg-black/80 backdrop-blur-sm p-3 text-xs text-gray-500 space-y-1 h-fit">
                   <p>Contract: {LOGCHAIN_SINGLETON_ADDR}</p>

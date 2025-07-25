@@ -15,16 +15,17 @@ export function IdentityCreation({
         <div className="flex items-center justify-center min-h-[60vh]">
             <div className="border border-gray-800 rounded-lg p-8 w-full max-w-md">
                 <div className="text-center mb-6">
+                    {/* Connected as...*/}
+                    <p className={`mb-4 font-semibold ${address ? "text-lg text-blue-300" : "text-base text-gray-400"}`}>
+                        {address
+                            ? <>Hello, <span className="font-mono">{address.slice(0, 6)}...{address.slice(-4)}</span></>
+                            : "Not connected"}
+                    </p>
                     <h2 className="text-2xl font-semibold mb-2">
                         Create Your Identity
                     </h2>
-                    <p className="text-sm text-gray-400">
-                        {address
-                            ? <>Connected as {address.slice(0, 8)}...{address.slice(-6)}</>
-                            : "Not connected"}
-                    </p>
                     <p className="text-sm text-gray-400 mt-2">
-                        Choose how to set up your encrypted messaging identity
+                        Choose how to set up your encrypted messaging identity:
                     </p>
                 </div>
 

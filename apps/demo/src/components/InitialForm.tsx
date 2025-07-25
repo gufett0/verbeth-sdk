@@ -2,6 +2,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 
 interface CenteredHandshakeFormProps {
   isConnected: boolean;
+  isBaseConnected: boolean;
   loading: boolean;
   recipientAddress: string;
   setRecipientAddress: (address: string) => void;
@@ -10,10 +11,13 @@ interface CenteredHandshakeFormProps {
   onSendHandshake: () => void;
   contactsLength: number;
   onBackToChats?: () => void;
+  onConnectBase: () => Promise<void>;
+  hasExistingIdentity: boolean;
 }
 
 export function InitialForm({
   isConnected,
+  isBaseConnected,
   loading,
   recipientAddress,
   setRecipientAddress,
@@ -22,9 +26,12 @@ export function InitialForm({
   onSendHandshake,
   contactsLength,
   onBackToChats,
+  onConnectBase,
+  hasExistingIdentity
 }: CenteredHandshakeFormProps) {
+  const isAnyConnected = isConnected || isBaseConnected;
   const shouldShowConnect =
-    !isConnected && (recipientAddress.trim().length > 0 || message.trim().length > 0);
+    !isAnyConnected && (recipientAddress.trim().length > 0 || message.trim().length > 0);
 
   return (
     <div className="flex items-center justify-center min-h-[60vh]">
@@ -47,7 +54,7 @@ export function InitialForm({
           ) : (
             <div className="w-full text-center">
               <h2 className="text-2xl font-semibold">
-                Start Your First Chat
+                {isAnyConnected ? "Welcome, " : ""}Start Your First Chat
               </h2>
               <div className="mt-2">
                 <span className="text-sm text-gray-400">
@@ -74,20 +81,16 @@ export function InitialForm({
             className="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded text-white"
           />
           {shouldShowConnect ? (
-            <ConnectButton.Custom>
-              {({ openConnectModal }: any) => (
-                <button
-                  onClick={openConnectModal}
-                  className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 rounded font-medium"
-                >
-                  Get started
-                </button>
-              )}
-            </ConnectButton.Custom>
+            <button
+              onClick={onConnectBase} // ← Cambia da openConnectModal a onConnectBase
+              className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 rounded font-medium"
+            >
+              {hasExistingIdentity ? "Sign In" : "Get started"}
+            </button>
           ) : (
             <button
               onClick={onSendHandshake}
-              disabled={loading || !recipientAddress.trim() || !message.trim() || !isConnected}
+              disabled={loading || !recipientAddress.trim() || !message.trim() || !isAnyConnected}
               className="w-full px-4 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed rounded font-medium"
             >
               {loading ? "Sending..." : "Send Request"}

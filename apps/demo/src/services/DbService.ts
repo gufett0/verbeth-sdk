@@ -553,19 +553,11 @@ async findPendingMessage(
   /* -------------------------------- ACCOUNT SWITCH -------------------------------- */
   async switchAccount(newAddress: string) {
     const normalizedAddress = this.normalizeAddress(newAddress);
-    console.log(
-      `...Switching to account: ${normalizedAddress.slice(
-        0,
-        8
-      )}... (original: ${newAddress.slice(0, 8)})`
-    );
 
-    // Clear deduplicator cache
     this.deduplicator.clear();
 
-    // Show current state
     const allIdentities = await this.db.identity.toArray();
-    console.log(`📊 Database state: ${allIdentities.length} total identities`);
+    console.log(`Database state: ${allIdentities.length} total identities`);
     allIdentities.forEach((id) => {
       console.log(
         `  - ${id.address} (derived: ${new Date(
@@ -574,7 +566,6 @@ async findPendingMessage(
       );
     });
 
-    // Show user-specific data counts
     const [contacts, messages, handshakes] = await Promise.all([
       this.getAllContacts(normalizedAddress),
       this.getAllMessages(normalizedAddress, 1000),

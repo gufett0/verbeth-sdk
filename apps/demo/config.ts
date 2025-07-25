@@ -12,18 +12,18 @@ const projectId = 'abcd4fa063dd349643afb0bdc85bb248';
 const name       = 'Unstoppable Chat';
 
 
+//coinbaseWallet.preference = 'smartWalletOnly'; 
 
-coinbaseWallet.preference = 'smartWalletOnly'; 
 const connectors = connectorsForWallets(
   [
     {
       groupName: 'Recommended',
       wallets: [
-        coinbaseWallet],
+        metaMaskWallet],
     },
     {
       groupName: 'Other options',
-      wallets: [walletConnectWallet, metaMaskWallet],
+      wallets: [walletConnectWallet],
     },
   ],
   { appName: name, projectId }

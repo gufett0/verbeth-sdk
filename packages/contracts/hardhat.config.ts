@@ -63,8 +63,8 @@ const config: HardhatUserConfig = {
   dependencyCompiler: {
     paths: [
       "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol",
-      //"@account-abstraction/contracts/core/EntryPoint.sol",
-      //"test/contracts/TestSmartAccount.sol"     
+      "@account-abstraction/contracts/core/EntryPoint.sol",
+      "test/contracts/TestSmartAccount.sol"     
     ]
   }
 };

@@ -129,7 +129,7 @@ importers:
         specifier: github:OpenZeppelin/openzeppelin-community-contracts
         version: https://codeload.github.com/OpenZeppelin/openzeppelin-community-contracts/tar.gz/70653e285faad147b94e1b676df712e59038fa1e
       '@openzeppelin/contracts':
-        specifier: ^5.3.0
+        specifier: ^5.4.0
         version: 5.4.0
       '@openzeppelin/contracts-upgradeable':
         specifier: ^5.3.0
@@ -7189,14 +7189,6 @@ snapshots:
     optionalDependencies:
       vite: 5.4.19(@types/node@20.19.9)
 
-  '@vitest/mocker@3.2.4(vite@5.4.19(@types/node@22.7.5))':
-    dependencies:
-      '@vitest/spy': 3.2.4
-      estree-walker: 3.0.3
-      magic-string: 0.30.17
-    optionalDependencies:
-      vite: 5.4.19(@types/node@22.7.5)
-
   '@vitest/pretty-format@3.2.4':
     dependencies:
       tinyrainbow: 2.0.0
@@ -10716,7 +10708,7 @@ snapshots:
     dependencies:
       '@types/chai': 5.2.2
       '@vitest/expect': 3.2.4
-      '@vitest/mocker': 3.2.4(vite@5.4.19(@types/node@22.7.5))
+      '@vitest/mocker': 3.2.4(vite@5.4.19(@types/node@20.19.9))
       '@vitest/pretty-format': 3.2.4
       '@vitest/runner': 3.2.4
       '@vitest/snapshot': 3.2.4

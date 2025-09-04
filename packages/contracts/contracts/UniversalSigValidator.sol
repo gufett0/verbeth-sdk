@@ -54,8 +54,8 @@ contract UniversalSigValidator {
           // if the call had side effects we need to return the
           // result using a `revert` (to undo the state changes)
           assembly {
-           mstore(0, isValid)
-           revert(31, 1)
+            mstore(0x00, isValid)     // store the bool at memory 0
+            revert(0x00, 0x20)        // revert with 32 bytes
           }
         }
 

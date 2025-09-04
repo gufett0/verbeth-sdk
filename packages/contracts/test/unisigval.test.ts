@@ -9,13 +9,6 @@ import { UniversalSigValidator } from "../typechain-types";
  *   These tests ensure that UniversalSigValidator behaves correctly
  *   with already deployed accounts (EOA + ERC-1271).
  *   They do not yet cover ERC-6492 pre-deploy simulation.
- *
- * @todo
- * Once ERC-6492 support is integrated, add tests that:
- *   1. Wrap a signature in a 6492 envelope with the account initCode.
- *   2. Call UniversalSigValidator using that envelope.
- *   3. Assert that verification succeeds even if the smart account
- *      is not deployed on-chain yet.
  */
 describe("UniversalSigValidator (minimal)", () => {
   let validator: UniversalSigValidator;

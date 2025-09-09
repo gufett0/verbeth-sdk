@@ -156,7 +156,7 @@ In the current [demo](apps/demo), if a user signs the initial handshake with a *
 
 **Incoming fix — ERC-6492**  
 [ERC-6492](https://eips.ethereum.org/EIPS/eip-6492) standardises a workaround: you wrap the signature together with the account’s `initCode` and send it to a singleton validator that *simulates* the deployment plus the ERC-1271 call in one `eth_call`. For now, I’ve deployed that singleton—[`UniversalSigValidator`](packages/contracts/contracts/UniversalSigValidator.sol)—at  
-0x1964A76a7C76C9483f056244c1065Aa0A3a9802d // Base mainnet.
+0x55E78e1bf2f47051f388F07d77649492A3544eA5 // Base mainnet.
 
 Our client workflow will soon:
 

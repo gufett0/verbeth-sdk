@@ -8,7 +8,8 @@ import { parseHandshakePayload, parseHandshakeKeys } from "./payload.js";
 import { 
   verifyEOADerivationProof, 
   verifySmartAccountDerivationProof, 
-  isSmartContract 
+  isSmartContract1271,
+  hasERC6492Suffix 
 } from "./utils.js";
 
 // ============= Handshake Verification =============
@@ -40,10 +41,19 @@ export async function verifyHandshakeIdentity(
       console.error("Failed to parse unified pubKeys from handshake event");
       return false;
     }
+
+    // 6492 awareness
+    const dp: any = content.derivationProof;
+    const sigPrimary: string = dp.signature;                       
+    const sig6492: string | undefined = dp.signature6492 ?? dp.erc6492; // optional: allow duck-typing
+    const uses6492 = hasERC6492Suffix(sigPrimary) || !!sig6492;
+    console.log("DEBUG verifyHSidentity - uses6492():", uses6492);
     
-    const isContract = await isSmartContract(handshakeEvent.sender, provider);
+    const isContract1271 = await isSmartContract1271(handshakeEvent.sender, provider);
+    console.log("DEBUG verifyHSidentity - isSmartContract1271():", isContract1271);
     
-    if (isContract) {
+    if (isContract1271 || uses6492) {
+      // smart-account path: verify via 1271 (deployed) OR ERC-6492 (undeployed)
       return await verifySmartAccountDerivationProof(
         content.derivationProof,
         handshakeEvent.sender,
@@ -92,14 +102,26 @@ export async function verifyHandshakeResponseIdentity(
       return false;
     }
 
-    const isContract = await isSmartContract(responseEvent.responder, provider);
+    // 6492 awareness
+    const dpAny: any = extractedResponse.derivationProof;
+    if (!dpAny) {
+      console.error("Missing derivationProof in handshake response payload");
+      return false;
+    }
+    const sigPrimary: string = dpAny.signature;
+    const sig6492: string | undefined = dpAny.signature6492 ?? dpAny.erc6492;
+    const uses6492 = hasERC6492Suffix(sigPrimary) || !!sig6492;
+    console.log("DEBUG verifyHSRESPidentity - uses6492():", uses6492);
+
+    const isContract1271 = await isSmartContract1271(responseEvent.responder, provider);
+    console.log("DEBUG verifyHSRESPidentity - isSmartContract1271():", isContract1271);
 
     const expectedKeys = {
       identityPubKey: extractedResponse.identityPubKey,
       signingPubKey: extractedResponse.signingPubKey
     };
     
-    if (isContract) {
+    if (isContract1271 || uses6492) {
       return await verifySmartAccountDerivationProof(
         extractedResponse.derivationProof,
         responseEvent.responder,

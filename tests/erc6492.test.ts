@@ -21,12 +21,15 @@ import {
   TestSmartAccount__factory,
   type TestSmartAccount,
 } from "../packages/contracts/typechain-types/index.js";
+import {
+  verifyERC6492WithSingleton,
+  ERC6492_SUFFIX,
+  DEFAULT_UNI_SIG_VALIDATOR,
+} from "../packages/sdk/src/utils.js";
 
 import { AnvilSetup } from "./setup.js";
 
 const ENTRYPOINT_ADDR = "0x0000000071727De22E5E9d8BAf0edAc6f37da032";
-const ERC6492_SUFFIX =
-  "0x6492649264926492649264926492649264926492649264926492649264926492";
 const CREATE_X_ADDR = "0xba5Ed099633D3B313e4D5F7bdc1305d3c28ba5Ed";
 
 describe("UniversalSigValidator — ERC-6492 integration", () => {
@@ -55,8 +58,10 @@ describe("UniversalSigValidator — ERC-6492 integration", () => {
       value: parseEther("1"),
     });
 
-    validator = await new UniversalSigValidator__factory(deployerNM).deploy();
-    await validator.waitForDeployment();
+    validator = UniversalSigValidator__factory.connect(
+      DEFAULT_UNI_SIG_VALIDATOR,
+      anvil.provider
+    );
   }, 60000);
 
   afterAll(async () => {
@@ -112,7 +117,6 @@ describe("UniversalSigValidator — ERC-6492 integration", () => {
 
       // the salt as expected by CreateX (guarded with msg.sender)
       const validatorAddr = await validator.getAddress();
-
       // build a 32b salt: [ first 20b = validatorAddr ][ 0x00 ][ 11b zeros ]
       const addr20 = getBytes(validatorAddr);
       const flag = Uint8Array.of(0x00); // RedeployProtection.False
@@ -158,7 +162,78 @@ describe("UniversalSigValidator — ERC-6492 integration", () => {
       );
       expect(ok).toBe(true);
 
-      // just double check that no real deployment happened
+      const code = await anvil.provider.getCode(predictedAddr);
+      expect(code).toBe("0x");
+    }, 60000);
+  });
+
+  // ----------------------------------------------------------------------
+
+  describe("SDK utils — verifyERC6492WithSingleton (Base CreateX)", () => {
+    it("returns true for counterfactual SA via 6492 envelope (no side effects)", async () => {
+      // 1) Build direct initCode for TestSmartAccount(ENTRYPOINT_ADDR, owner)
+      const ctorArgs = new AbiCoder().encode(
+        ["address", "address"],
+        [ENTRYPOINT_ADDR, smartAccountOwner.address]
+      );
+      const initCode = (TestSmartAccount__factory.bytecode +
+        ctorArgs.slice(2)) as `0x${string}`;
+      const initCodeHash = keccak256(initCode);
+
+      // 2) Use the locally deployed validator address instead of Base mainnet
+      const validatorAddr = (await validator.getAddress()) as `0x${string}`;
+      console.log("DEBUG - using validator address:", validatorAddr);
+      const addr20 = getBytes(validatorAddr).slice(0, 20);
+      const flag = Uint8Array.of(0x00);
+      const entropy = new Uint8Array(11);
+      const salt = hexlify(concat([addr20, flag, entropy]));
+
+      const addr32 = new AbiCoder().encode(["address"], [validatorAddr]); // 32-byte padded
+      const guardedSalt = keccak256(concat([addr32, salt])); // _efficientHash(a,b)
+
+      const predictedAddr = getCreate2Address(
+        CREATE_X_ADDR,
+        guardedSalt,
+        initCodeHash
+      );
+
+      const singletonCode = await anvil.provider.getCode(validatorAddr);
+      expect(singletonCode).not.toBe("0x");
+      console.log(
+        "DEBUG - validator singleton code size:",
+        (singletonCode.length - 2) / 2
+      );
+
+      // 3) Message + signature (owner)
+      const msg = new Uint8Array(32);
+      const digest = hashMessage(msg);
+      const rawSig = await smartAccountOwner.signMessage(msg);
+
+      // 4) CreateX calldata + 6492 envelope
+      const createXInterface = new Interface([
+        "function deployCreate2(bytes32 salt, bytes initCode) returns (address)",
+      ]);
+      const factoryCalldata = createXInterface.encodeFunctionData(
+        "deployCreate2",
+        [salt, initCode] // unguarded salt; CreateX guards internally
+      );
+      const prefix = new AbiCoder().encode(
+        ["address", "bytes", "bytes"],
+        [CREATE_X_ADDR, factoryCalldata, rawSig]
+      );
+      const wrapped = concat([prefix, ERC6492_SUFFIX]) as `0x${string}`;
+
+      // 5) Call verbeth util
+      const ok = await verifyERC6492WithSingleton({
+        account: predictedAddr,
+        messageHash: digest,
+        sig6492Envelope: wrapped,
+        provider: anvil.provider,
+        validator: validatorAddr,
+      });
+      expect(ok).toBe(true);
+
+      // 6) No side effects: account is still undeployed
       const code = await anvil.provider.getCode(predictedAddr);
       expect(code).toBe("0x");
     }, 60000);

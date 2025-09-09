@@ -8,7 +8,7 @@ import {
   JsonRpcProvider,
 } from "ethers";
 import nacl from "tweetnacl";
-import { sha256 } from "@noble/hashes/sha256";
+import { sha256 } from "@noble/hashes/sha2";
 import { hkdf } from "@noble/hashes/hkdf";
 
 import {

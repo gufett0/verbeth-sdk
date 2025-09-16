@@ -110,6 +110,12 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
 - Fully on-chain: no servers, no relays
 - Compatible with EOAs and smart contract accounts
 
+The SDK now verifies handshakes and handshake responses using [viem.verifyMessage](https://viem.sh/docs/actions/public/verifyMessage).  
+It supports both EOAs and Smart Contract Accounts — whether they’re already deployed or still counterfactual/pre-deployed — by leveraging:
+
+- ERC-1271: for verifying signatures from smart contract wallets that are deployed.
+- ERC-6492: a wrapper standard that lets smart contract accounts sign and be verified before deployment.
+
 ## Example Usage (WIP)
 
 ```ts
@@ -143,26 +149,3 @@ await sendEncryptedMessage({
   recipientPublicKey,              
 });
 ```
-
-
-## ⚠️ Smart Account Handshake Limitation
- 
-[ERC-1271](https://eips.ethereum.org/EIPS/eip-1271) lets a smart-contract wallet prove ownership by exposing `isValidSignature`.  
-Because the code that implements that function lives *inside* the contract, the check is impossible until the wallet is actually deployed. Any counter-factual (pre-deploy) account therefore fails a plain ERC-1271 test.
-
-In the current [demo](apps/demo), if a user signs the initial handshake with a **fresh** Smart Account, the sdk can’t verify it yet, so the handshake appears to hang. Deployed accounts work fine.
-
-**Solution in Progress:** A new [`UniversalSigValidator`](packages/contracts/contracts/UniversalSigValidator.sol) contract to fully support [ERC-6492](https://eips.ethereum.org/EIPS/eip-6492) signatures.
-
-**Incoming fix — ERC-6492**  
-[ERC-6492](https://eips.ethereum.org/EIPS/eip-6492) standardises a workaround: you wrap the signature together with the account’s `initCode` and send it to a singleton validator that *simulates* the deployment plus the ERC-1271 call in one `eth_call`. For now, I’ve deployed that singleton—[`UniversalSigValidator`](packages/contracts/contracts/UniversalSigValidator.sol)—at  
-0x55E78e1bf2f47051f388F07d77649492A3544eA5 // Base mainnet.
-
-Our client workflow will soon:
-
-1. **Try ERC-1271** on the account (works once it’s live).  
-2. **If that reverts**, wrap the signature in an ERC-6492 envelope and ask `UniversalSigValidator` to verify it.
-
-Once integrated, handshake verification will just work regardless of smart account deployment status.
-
-> **Until that release, unverified handshake for undeployed accounts are expected behaviour.**

@@ -36,17 +36,17 @@ export async function deriveIdentityKeyPairWithProof(signer: any, address: strin
   const messageRawHex = ("0x" + Buffer.from(message, 'utf-8').toString('hex')) as `0x${string}`;
   
   // Use HKDF for secure key derivation
-  const ikm = sha256(signature);                                    // Input Key Material
-  const salt = new Uint8Array(32);                                 // Empty salt
+  const ikm = sha256(signature);                                  
+  const salt = new Uint8Array(32);                             
   
   // Derive X25519 keys for encryption
   const info_x25519 = new TextEncoder().encode("verbeth-x25519-v1");
-  const keyMaterial_x25519 = hkdf(sha256, ikm, salt, info_x25519, 32);  // 32 bytes for X25519
+  const keyMaterial_x25519 = hkdf(sha256, ikm, salt, info_x25519, 32);  
   const boxKeyPair = nacl.box.keyPair.fromSecretKey(keyMaterial_x25519);
   
   // Derive Ed25519 keys for signing
   const info_ed25519 = new TextEncoder().encode("verbeth-ed25519-v1");
-  const keyMaterial_ed25519 = hkdf(sha256, ikm, salt, info_ed25519, 32); // 32 bytes for Ed25519 seed
+  const keyMaterial_ed25519 = hkdf(sha256, ikm, salt, info_ed25519, 32); 
   const signKeyPair = nacl.sign.keyPair.fromSeed(keyMaterial_ed25519);
   
   const result = {

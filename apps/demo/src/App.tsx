@@ -63,12 +63,6 @@ export default function App() {
   const [baseAddress, setBaseAddress] = useState<string | null>(null);
   const [isBaseConnected, setIsBaseConnected] = useState(false);
 
-  const [verificationResult, setVerificationResult] = useState<string | null>(null);
-  const [testMessage] = useState("Hello from passkey verification test!");
-  const [testSignature, setTestSignature] = useState<string | null>(null);
-  const [testVerificationResult, setTestVerificationResult] = useState<string | null>(null);
-  const [testSignerAddr, setTestSignerAddr] = useState<`0x${string}` | null>(null);
-
   const logRef = useRef<HTMLTextAreaElement>(null);
 
   const chainId = Number(import.meta.env.VITE_CHAIN_ID);

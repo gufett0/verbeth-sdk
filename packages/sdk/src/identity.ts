@@ -1,9 +1,10 @@
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '@noble/hashes/sha2';
 import { hkdf } from '@noble/hashes/hkdf';
 import { Signer } from 'ethers';
 import nacl from 'tweetnacl';
 import { encodeUnifiedPubKeys } from './payload.js';
 import { DerivationProof } from './types.js';
+import { hasERC6492Suffix } from './utils.js';
 
 interface IdentityKeyPair {
   // X25519 keys per encryption/decryption
@@ -19,16 +20,20 @@ interface IdentityKeyPair {
  * Uses HKDF (RFC 5869) for secure key derivation from wallet signature
  * It also returns derivation proof to verify the keypair was derived from the wallet address.
  */
-export async function deriveIdentityKeyPairWithProof(signer: Signer, address: string): Promise<{
+export async function deriveIdentityKeyPairWithProof(signer: any, address: string): Promise<{
   keyPair: IdentityKeyPair;
   derivationProof: {
     message: string;
     signature: string;
+    messageRawHex?: `0x${string}`;
   };
 }> {
   // deterministic seed from wallet signature
   const message = `VerbEth Identity Key Derivation v1\nAddress: ${address.toLowerCase()}`;
+
   const signature = await signer.signMessage(message);
+
+  const messageRawHex = ("0x" + Buffer.from(message, 'utf-8').toString('hex')) as `0x${string}`;
   
   // Use HKDF for secure key derivation
   const ikm = sha256(signature);                                    // Input Key Material
@@ -55,7 +60,8 @@ export async function deriveIdentityKeyPairWithProof(signer: Signer, address: st
     keyPair: result,
     derivationProof: {
       message,
-      signature
+      signature,
+      messageRawHex
     }
   };
 }

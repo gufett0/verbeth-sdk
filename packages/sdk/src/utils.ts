@@ -1,12 +1,56 @@
 // packages/sdk/src/utils.ts
 
-import { Contract, JsonRpcProvider, verifyMessage, hashMessage } from "ethers";
+import {
+  Contract,
+  JsonRpcProvider,
+  verifyMessage,
+  hashMessage,
+  hexlify,
+} from "ethers";
 import { sha256 } from "@noble/hashes/sha2";
 import { hkdf } from "@noble/hashes/hkdf";
 import nacl from "tweetnacl";
 import { DerivationProof } from "./types.js";
 import { keccak256, toUtf8Bytes } from "ethers";
 import { AbiCoder } from "ethers";
+import { createPublicClient, custom, defineChain, type Address, type PublicClient } from 'viem';
+
+export type Rpcish =
+  | import('ethers').JsonRpcProvider            // ethers v6 RPC
+  | import('ethers').BrowserProvider           // ethers v6 EIP-1193 (browser)
+  | { request: (args: { method: string; params?: any[] }) => Promise<any> }; // generic EIP-1193
+
+
+function toEip1193(provider: Rpcish) {
+  if ((provider as any).request) return provider as { request: ({ method, params }: any) => Promise<any> };
+  // ethers JsonRpcProvider → shim .request
+  if ((provider as any).send) {
+    return {
+      request: ({ method, params }: { method: string; params?: any[] }) =>
+        (provider as any).send(method, params ?? []),
+    };
+  }
+  throw new Error('Unsupported provider: cannot build EIP-1193 request');
+}
+
+export async function makeViemPublicClient(provider: Rpcish): Promise<PublicClient> {
+  const eip1193 = toEip1193(provider);
+
+  let chainId = 1;
+  try {
+    const hex = await eip1193.request({ method: 'eth_chainId' });
+    chainId = Number(hex);
+  } catch {/* default 1 */}
+
+  const chain = defineChain({
+    id: chainId,
+    name: `chain-${chainId}`,
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    rpcUrls: { default: { http: [] } },
+  });
+
+  return createPublicClient({ chain, transport: custom(eip1193) });
+}
 
 export const ERC6492_SUFFIX =
   "0x6492649264926492649264926492649264926492649264926492649264926492";
@@ -15,40 +59,6 @@ export function hasERC6492Suffix(sigHex: string): boolean {
   if (!sigHex || typeof sigHex !== "string") return false;
   const s = sigHex.toLowerCase();
   return s.endsWith(ERC6492_SUFFIX.slice(2).toLowerCase());
-}
-
-export const DEFAULT_UNI_SIG_VALIDATOR =
-  "0x55E78e1bf2f47051f388F07d77649492A3544eA5"; // Base mainnet (for now)
-
-
-/**
- * Generalized EIP-1271 signature verification
- * Checks if a smart contract validates a signature according to EIP-1271
- */
-export async function verifyEIP1271Signature(
-  contractAddress: string,
-  messageHash: string,
-  signature: string,
-  provider: JsonRpcProvider
-): Promise<boolean> {
-  try {
-    const accountContract = new Contract(
-      contractAddress,
-      [
-        "function isValidSignature(bytes32, bytes) external view returns (bytes4)",
-      ],
-      provider
-    );
-
-    const result = await accountContract.isValidSignature(
-      messageHash,
-      signature
-    );
-    return result === "0x1626ba7e";
-  } catch (err) {
-    console.error("EIP-1271 verification error:", err);
-    return false;
-  }
 }
 
 /**
@@ -210,160 +220,68 @@ export function verifyEOADerivationProof(
   );
 }
 
+
 /**
- * Verifies derivation proof for smart accounts (EIP-1271 or ERC-6492)
+ * Verifies derivation proof for smart accounts (EIP-1271 or ERC-6492).
  * Handles both deployed and counterfactual accounts, then re-derives keys.
  */
 export async function verifySmartAccountDerivationProof(
   derivationProof: DerivationProof,
   smartAccountAddress: string,
-  expectedUnifiedKeys: {
-    identityPubKey: Uint8Array;
-    signingPubKey: Uint8Array;
-  },
-  provider: JsonRpcProvider
+  expectedUnifiedKeys: { identityPubKey: Uint8Array; signingPubKey: Uint8Array },
+  provider: Rpcish,
 ): Promise<boolean> {
   try {
-    const messageHash = hashMessage(derivationProof.message);
+    const client = await makeViemPublicClient(provider);
+    const address = smartAccountAddress as Address;
+    const sigPrimary = derivationProof.signature as `0x${string}`;
 
-    // 1) choose 1271 vs 6492
-    let ok = false;
-    const code = await provider.getCode(smartAccountAddress);
+    const okViem = await client.verifyMessage({
+      address,
+      message: derivationProof.message,
+      signature: sigPrimary,
+    });
 
-    // try 6492 first if the provided signature is a 6492 envelope or an extra 6492 field is present
-    const dpAny: any = derivationProof as any;
-    const sigPrimary = derivationProof.signature;
-    const sig6492 = hasERC6492Suffix(sigPrimary)
-      ? sigPrimary
-      : dpAny.signature6492 ?? dpAny.erc6492;
-
-    if (sig6492) {
-      ok = await verifyERC6492WithSingleton({
-        account: smartAccountAddress,
-        messageHash,
-        sig6492Envelope: sig6492,
-        provider,
-      });
-
-      console.log(
-        "DEBUG verifySmartAccountDerivationProof - tried ERC-6492:",
-        ok
-      );
-    } else if (code !== "0x") {
-      // account is deployed: plain EIP-1271
-      ok = await verifyEIP1271Signature(
-        smartAccountAddress,
-        messageHash,
-        sigPrimary,
-        provider
-      );
-    } else {
-      // undeployed + no 6492 envelope → cannot verify
-      console.error(
-        "DEBUG Smart account undeployed and no ERC-6492 signature provided"
-      );
-      return false;
+    if (okViem) {
+      return rederiveAndMatchKeys(derivationProof, expectedUnifiedKeys);
     }
-
-    if (!ok) return false;
-
-    // 2) key re-derivation stays EXACTLY the same (derive from the *raw* signature field)
-    const ikm = sha256(derivationProof.signature);
-    const salt = new Uint8Array(32);
-
-    const info_x25519 = new TextEncoder().encode("verbeth-x25519-v1");
-    const keyMaterial_x25519 = hkdf(sha256, ikm, salt, info_x25519, 32);
-    const boxKeyPair = nacl.box.keyPair.fromSecretKey(keyMaterial_x25519);
-
-    const info_ed25519 = new TextEncoder().encode("verbeth-ed25519-v1");
-    const keyMaterial_ed25519 = hkdf(sha256, ikm, salt, info_ed25519, 32);
-    const signKeyPair = nacl.sign.keyPair.fromSeed(keyMaterial_ed25519);
-
-    const identityMatches = Buffer.from(boxKeyPair.publicKey).equals(
-      Buffer.from(expectedUnifiedKeys.identityPubKey)
-    );
-    const signingMatches = Buffer.from(signKeyPair.publicKey).equals(
-      Buffer.from(expectedUnifiedKeys.signingPubKey)
-    );
-    return identityMatches && signingMatches;
+    return false;
   } catch (err) {
-    console.error("verifySmartAccountDerivationProof error:", err);
+    console.error('verifySmartAccountDerivationProof error:', err);
     return false;
   }
 }
 
-/**
- * Verifies an ERC-6492 envelope using the Universal Signature Validator singleton
- *
- * Supports both deployed and counterfactual smart accounts:
- *  - Wraps the account’s signature in a 6492 envelope
- *  - Calls the singleton’s `isValidSig` helper
- *  - Handles revert-with-data cases used for counterfactual paths
- *
- * Returns true if the validator confirms the signature is valid, false otherwise.
- */
-export async function verifyERC6492WithSingleton(params: {
-  account: string;
-  messageHash: string;
-  sig6492Envelope: string;
-  provider: JsonRpcProvider;
-  validator?: string;
-  allowSideEffects?: boolean;
-}): Promise<boolean> {
-  const {
-    account,
-    messageHash,
-    sig6492Envelope,
-    provider,
-    validator = DEFAULT_UNI_SIG_VALIDATOR,
-    allowSideEffects = false,
-  } = params;
+// --- identico alla tua re-derivazione, solo estratto in helper -------------
+function rederiveAndMatchKeys(
+  derivationProof: DerivationProof,
+  expectedUnifiedKeys: { identityPubKey: Uint8Array; signingPubKey: Uint8Array }
+): boolean {
+  const ikm = sha256(derivationProof.signature);
+  const salt = new Uint8Array(32);
 
-  // try 4 args first
-  const abi4 = [
-    "function isValidSig(address,bytes32,bytes,bool) view returns (bool)",
-  ];
-  const abi3 = [
-    "function isValidSig(address,bytes32,bytes) view returns (bool)",
-  ];
-  let v = new Contract(validator, abi4, provider);
+  const info_x25519 = new TextEncoder().encode("verbeth-x25519-v1");
+  const keyMaterial_x25519 = hkdf(sha256, ikm, salt, info_x25519, 32);
+  const boxKeyPair = nacl.box.keyPair.fromSecretKey(keyMaterial_x25519);
 
-  const tryCall = async (c: Contract, withSideEffectsArg: boolean) => {
-    try {
-      if (withSideEffectsArg) {
-        return await c.isValidSig.staticCall(
-          account,
-          messageHash,
-          sig6492Envelope,
-          allowSideEffects
-        );
-      } else {
-        return await c.isValidSig.staticCall(
-          account,
-          messageHash,
-          sig6492Envelope
-        );
-      }
-    } catch (err: any) {
-      // counterfactual path: singleton reverts with 32-byte bool to undo side effects
-      const data: string | undefined = err?.data ?? err?.error?.data;
-      if (data && data !== "0x" && data.length >= 66) {
-        try {
-          return BigInt(data) !== 0n;
-        } catch {}
-      }
-      throw err; // for abi fallback
-    }
-  };
+  const info_ed25519 = new TextEncoder().encode("verbeth-ed25519-v1");
+  const keyMaterial_ed25519 = hkdf(sha256, ikm, salt, info_ed25519, 32);
+  const signKeyPair = nacl.sign.keyPair.fromSeed(keyMaterial_ed25519);
 
-  try {
-    return await tryCall(v, true);
-  } catch {
-    v = new Contract(validator, abi3, provider);
-    try {
-      return await tryCall(v, false);
-    } catch {
-      return false;
-    }
+  const identityMatches = Buffer.from(boxKeyPair.publicKey).equals(
+    Buffer.from(expectedUnifiedKeys.identityPubKey)
+  );
+  const signingMatches = Buffer.from(signKeyPair.publicKey).equals(
+    Buffer.from(expectedUnifiedKeys.signingPubKey)
+  );
+
+  if (!identityMatches) {
+    console.error("Re-derived X25519 identity key doesn't match expected");
+    return false;
   }
+  if (!signingMatches) {
+    console.error("Re-derived Ed25519 signing key doesn't match expected");
+    return false;
+  }
+  return true;
 }

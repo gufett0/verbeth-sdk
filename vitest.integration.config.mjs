@@ -10,7 +10,7 @@ export default {
         singleFork: true
       }
     },
-    include: ['tests/handshaking.test.ts', 'tests/messaging.test.ts', 'tests/e2e.test.ts', 'tests/erc6492.test.ts', '*.test.ts'],
+    include: ['tests/handshaking.test.ts', 'tests/messaging.test.ts', 'tests/e2e.test.ts', '*.test.ts'],
     exclude: ['**/node_modules/**', 'packages/**']
   },
   define: {

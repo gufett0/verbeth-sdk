@@ -36,6 +36,7 @@ export interface IdentityKeyPair {
 export interface DerivationProof {
   message: string; // "VerbEth Identity Key Derivation v1\nAddress: ..."
   signature: string; // Ethereum signature of the message
+  messageRawHex?: `0x${string}`; // optional: hex-encoded raw message (for 6492)
 }
 
 export type PackedUserOperation =

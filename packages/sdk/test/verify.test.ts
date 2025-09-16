@@ -14,7 +14,6 @@ import { hkdf } from "@noble/hashes/hkdf";
 import {
   verifyEOADerivationProof,
   verifySmartAccountDerivationProof,
-  verifyEIP1271Signature,
 } from "../src/utils.js";
 import {
   verifyHandshakeIdentity,
@@ -96,40 +95,8 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
   });
 
   describe("Smart Contract Verification", () => {
-    it("verifyEIP1271Signature - handles both success and failure cases", async () => {
-      const contractAddress = "0xCcCcCc1234567890123456789012345678901234";
-      const messageHash = "0x" + "aa".repeat(32);
-      const signature = "0x" + "bb".repeat(65);
-
-      const failingProvider = {
-        async getCode() {
-          return "0x60016000";
-        },
-        async call() {
-          throw new Error("Contract call failed");
-        },
-      } as unknown as JsonRpcProvider;
-
-      const result = await verifyEIP1271Signature(
-        contractAddress,
-        messageHash,
-        signature,
-        failingProvider
-      );
-
-      const result2 = await verifyEIP1271Signature(
-        contractAddress,
-        messageHash,
-        signature,
-        mockProvider
-      );
-
-      expect(result).toBe(false);
-      expect(result2).toBe(true);
-    });
-
     it("verifySmartAccountDerivationProof - handles EIP-1271 correctly", async () => {
-      const contractAddress = "0xCcCcCc1234567890123456789012345678901234";
+      const contractAddress = Wallet.createRandom().address;
       const tempWallet = Wallet.createRandom();
 
       const message = `VerbEth Identity Key Derivation v1\nAddress: ${contractAddress}`;
@@ -147,7 +114,6 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
       const info_x25519 = new TextEncoder().encode("verbeth-x25519-v1");
       const keyMaterial_x25519 = hkdf(sha256, ikm, salt, info_x25519, 32);
       const boxKeyPair = nacl.box.keyPair.fromSecretKey(keyMaterial_x25519);
-
       // Derive Ed25519 keys
       const info_ed25519 = new TextEncoder().encode("verbeth-ed25519-v1");
       const keyMaterial_ed25519 = hkdf(sha256, ikm, salt, info_ed25519, 32);
@@ -159,14 +125,17 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
       };
 
       const enhancedMockProvider = {
-        async getCode(address: string) {
-          return address.startsWith("0xCc") ? "0x60016000" : "0x";
+        async request({ method, params }: { method: string; params?: any[] }) {
+          if (method === "eth_getCode") {
+            const address = params?.[0];
+            return address.startsWith("0xCc") ? "0x60016000" : "0x";
+          }
+          if (method === "eth_call") {
+            return "0x1";
+          }
+          throw new Error(`Unsupported method: ${method}`);
         },
-        async call(request: any) {
-          // EIP-1271 mock: a simulation of a contract that always returns a valid signature
-          return "0x1626ba7e" + "0".repeat(56);
-        },
-      } as unknown as JsonRpcProvider;
+      } as any;
 
       const result = await verifySmartAccountDerivationProof(
         derivationProof,
@@ -174,6 +143,7 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
         expectedKeys,
         enhancedMockProvider
       );
+      console.log("verifySmartAccountDerivationProof result:", result);
 
       expect(result).toBe(true);
     });

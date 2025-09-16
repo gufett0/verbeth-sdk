@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { CopyIcon } from "lucide-react";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useWalletClient } from 'wagmi';
-import { useRpcProvider } from './rpc.js';
+import { useRpcClients } from './rpc.js';
 import { BrowserProvider } from "ethers";
 import {
   LogChainV1__factory,
@@ -35,7 +35,7 @@ import { useChatActions } from './hooks/useChatActions.js';
 
 
 export default function App() {
-  const readProvider = useRpcProvider();
+  const { ethers: readProvider, viem: viemClient } = useRpcClients();
   const { address, isConnected } = useAccount();
   const { data: walletClient } = useWalletClient();
 
@@ -63,7 +63,15 @@ export default function App() {
   const [baseAddress, setBaseAddress] = useState<string | null>(null);
   const [isBaseConnected, setIsBaseConnected] = useState(false);
 
+  const [verificationResult, setVerificationResult] = useState<string | null>(null);
+  const [testMessage] = useState("Hello from passkey verification test!");
+  const [testSignature, setTestSignature] = useState<string | null>(null);
+  const [testVerificationResult, setTestVerificationResult] = useState<string | null>(null);
+  const [testSignerAddr, setTestSignerAddr] = useState<`0x${string}` | null>(null);
+
   const logRef = useRef<HTMLTextAreaElement>(null);
+
+  const chainId = Number(import.meta.env.VITE_CHAIN_ID);
 
   const addLog = useCallback((message: string) => {
     const timestamp = new Date().toLocaleTimeString();
@@ -125,18 +133,9 @@ export default function App() {
       try {
         addLog("Deriving new identity key (Base Smart Account)...");
 
-        // mock signer 
-        const baseSigner = {
-          signMessage: async (message: string) => {
-            return await baseProvider.request({
-              method: 'personal_sign',
-              params: [message, baseAddress]
-            });
-          },
-          getAddress: () => baseAddress
-        };
+        const result = await deriveIdentityKeyPairWithProof(signer, baseAddress);
 
-        const result = await deriveIdentityKeyPairWithProof(baseSigner as any, baseAddress);
+        console.log("!!!!Debug🔑 [createIdentity] derivationProof:", result.derivationProof);
 
         setIdentityKeyPair(result.keyPair);
         setDerivationProof(result.derivationProof);
@@ -305,21 +304,14 @@ export default function App() {
     const executorInstance = ExecutorFactory.createBaseSmartAccount(
       baseProvider,
       LOGCHAIN_SINGLETON_ADDR,
-      8453,
+      chainId,
       paymasterUrl
     );
 
-    const mockSigner = {
-      signMessage: async (message: string) => {
-        return baseProvider.request({
-          method: 'personal_sign',
-          params: [message, baseAddress]
-        });
-      },
-      getAddress: () => baseAddress!
-    };
+    const browserProvider = new BrowserProvider(baseProvider);
+    const realSigner = await browserProvider.getSigner(baseAddress!);
 
-    setSigner(mockSigner);
+    setSigner(realSigner);
     setExecutor(executorInstance);
 
     if (baseAddress !== currentAccount) {
@@ -358,12 +350,12 @@ export default function App() {
     setNeedsIdentityCreation(false);
   };
 
-  const initializeBaseSDK = useCallback(() => {
+  const initializeBaseSDK = useCallback(async () => {
     if (!baseSDK) {
       const sdk = createBaseAccountSDK({
         appName: 'Verbeth Chat',
         //appLogoUrl: 'https://base.org/logo.png',
-        appChainIds: [8453],
+        appChainIds: [chainId],
       });
 
       const provider = sdk.getProvider();
@@ -404,12 +396,11 @@ export default function App() {
       initializeBaseSDK();
       return;
     }
-
     try {
       const accounts = await baseProvider.request({
-        method: 'eth_requestAccounts',
-        params: []
-      });
+        method: "eth_requestAccounts",
+        params: [],
+      }) as string[];
 
       if (accounts.length > 0) {
         setBaseAddress(accounts[0]);
@@ -436,6 +427,40 @@ export default function App() {
   useEffect(() => {
     initializeBaseSDK();
   }, [initializeBaseSDK]);
+
+
+  // const handleVerifyMessage = useCallback(async () => {
+  //   if (!viemClient || !derivationProof) {
+  //     addLog("⚠ Missing viem client or derivation proof for verification");
+  //     return;
+  //   }
+  //   const currentAddress = address || baseAddress;
+  //   if (!currentAddress) {
+  //     addLog("⚠ No connected address for verification");
+  //     return;
+  //   }
+
+  //   setLoading(true);
+  //   try {
+  //     addLog("🔍 Verifying stored identity proof...");
+  //     const { message, signature } = derivationProof;
+
+  //     const ok = await viemClient.verifyMessage({
+  //       address: currentAddress as `0x${string}`,
+  //       message,
+  //       signature: signature as `0x${string}`,
+  //     });
+
+  //     setVerificationResult(ok ? "valid" : "invalid");
+  //     addLog(`✅ Identity proof verification: ${ok ? "VALID" : "INVALID"}`);
+  //   } catch (e: any) {
+  //     console.error(e);
+  //     setVerificationResult("invalid");
+  //     addLog(`⚠ Verification failed: ${e?.message ?? e}`);
+  //   } finally {
+  //     setLoading(false);
+  //   }
+  // }, [viemClient, derivationProof, address, baseAddress, addLog]);
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -515,6 +540,55 @@ export default function App() {
             />
 
             <CelebrationToast show={showToast} onClose={() => setShowToast(false)} />
+
+            {/* Identity Proof Verification Section
+            {ready && (isConnected || isBaseConnected) && !needsIdentityCreation && derivationProof && (
+              <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">Identity Proof Verification</h3>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleVerifyMessage}
+                      disabled={loading}
+                      className="px-3 py-2 text-sm bg-green-700 hover:bg-green-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded"
+                    >
+                      {loading ? "Verifying..." : "Verify Stored Proof"}
+                    </button>
+
+                    {verificationResult && (
+                      <span className={`text-sm px-3 py-1 rounded ${verificationResult === "valid"
+                        ? "bg-green-800 text-green-200"
+                        : "bg-red-800 text-red-200"
+                        }`}>
+                        {verificationResult.toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                </div> */}
+
+                {/* Display stored proof data */}
+                {/* <div className="space-y-3 text-sm">
+                  <div className="bg-gray-800 rounded p-3">
+                    <p className="text-gray-400 mb-1">Connected Address:</p>
+                    <p className="font-mono text-blue-400 break-all">
+                      {address || baseAddress || "Not connected"}
+                    </p>
+                  </div>
+
+                  <div className="bg-gray-800 rounded p-3">
+                    <p className="text-gray-400 mb-1">Stored Proof Message:</p>
+                    <p className="font-mono text-green-400 break-all">{derivationProof.message}</p>
+                  </div>
+
+                  <div className="bg-gray-800 rounded p-3">
+                    <p className="text-gray-400 mb-1">Stored Proof Signature:</p>
+                    <p className="font-mono text-yellow-400 break-all text-xs">
+                      {derivationProof.signature}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )} */}
 
             {needsIdentityCreation ? (
               <IdentityCreation

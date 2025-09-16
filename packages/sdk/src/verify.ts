@@ -1,7 +1,5 @@
 // packages/sdk/src/verify.ts
-import { 
-  JsonRpcProvider
-} from "ethers";
+import { JsonRpcProvider } from "ethers";
 import { decryptAndExtractHandshakeKeys } from "./crypto.js";
 import { HandshakeLog, HandshakeResponseLog } from "./types.js";
 import { parseHandshakePayload, parseHandshakeKeys } from "./payload.js";
@@ -45,12 +43,10 @@ export async function verifyHandshakeIdentity(
     // 6492 awareness
     const dp: any = content.derivationProof;
     const sigPrimary: string = dp.signature;                       
-    const sig6492: string | undefined = dp.signature6492 ?? dp.erc6492; // optional: allow duck-typing
+    const sig6492: string | undefined = dp.signature6492 ?? dp.erc6492; 
     const uses6492 = hasERC6492Suffix(sigPrimary) || !!sig6492;
-    console.log("DEBUG verifyHSidentity - uses6492():", uses6492);
     
     const isContract1271 = await isSmartContract1271(handshakeEvent.sender, provider);
-    console.log("DEBUG verifyHSidentity - isSmartContract1271():", isContract1271);
     
     if (isContract1271 || uses6492) {
       // smart-account path: verify via 1271 (deployed) OR ERC-6492 (undeployed)
@@ -111,10 +107,8 @@ export async function verifyHandshakeResponseIdentity(
     const sigPrimary: string = dpAny.signature;
     const sig6492: string | undefined = dpAny.signature6492 ?? dpAny.erc6492;
     const uses6492 = hasERC6492Suffix(sigPrimary) || !!sig6492;
-    console.log("DEBUG verifyHSRESPidentity - uses6492():", uses6492);
 
     const isContract1271 = await isSmartContract1271(responseEvent.responder, provider);
-    console.log("DEBUG verifyHSRESPidentity - isSmartContract1271():", isContract1271);
 
     const expectedKeys = {
       identityPubKey: extractedResponse.identityPubKey,

@@ -9,14 +9,14 @@ Alice wants to initiate a secure chat with Bob using only the blockchain.
 1. Alice generates a new **ephemeral keypair**.
 2. She emits a `Handshake` event:
    - Includes her ephemeral public key
-   - Includes her long-term unified keys (X25519 identity + Ed25519 signing, derived from Ethereum address)
-   - Plaintext payload like: `"Hi Bob, respond if you're online"` with derivation proof
+   - Includes her long-term unified keys (X25519 identity + Ed25519 signing)
+   - Plaintext payload like: `"Hi Bob, respond if you're online"` with identity proof
 3. Bob watches logs for `Handshake` events addressed to him:
    - Looks for `keccak256("contact:0xMyAddress")` in `recipientHash`
-   - Verifies Alice's identity using her derivation proof
+   - Verifies Alice's identity using her identity proof
 4. If interested, Bob responds with a `HandshakeResponse`:
    - Contains a payload encrypted to Alice's **ephemeral key** (not identity key)
-   - Includes his own ephemeral key, identity keys, and derivation proof
+   - Includes his own ephemeral key, identity keys, and identity proof
 5. Once handshake is complete, both use Bob's identity key for future `MessageSent` logs:
    - Alice encrypts messages using Bob's **identity key** + **fresh ephemeral keys per message**
    - Alice signs messages using her **signing key**
@@ -33,15 +33,17 @@ on-chain announcement, or static mapping), the sender may skip the handshake.
 ```
 ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |                            |                            |
-      |----------------------------|                            |
-      |  PHASE 0: Identity Key Derivation (Proof)               |
+      |----------------------------|----------------------------|
+      |                          PHASE 0:                       |
+      |                 Identity and Key Derivation             |
       |--------------------------->|                            |
-      |  Sign derivation msg       |                            |
-      |  Derive unified keys       |                            |
-      |  Create DerivationProof    |                            |
+      |  Generate identity keys     |                           |
+      | Sign identity-binding msg  |                            |                            
+      |  Create IdentityProof      |                            |
       |                            |<---------------------------|
-      |                            |  Bob: Sign/derive keys     |
-      |                            |  Create DerivationProof    |
+      |                            |  Generate identity keys    |                            
+      |                            | Sign identity-binding msg  |                         
+      |                            |   Create IdentityProof     |
       |                            |                            |
       |  PHASE 1: Alice Initiates Handshake                     |
       |--------------------------->|                            |
@@ -54,7 +56,7 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |                            |  PHASE 2: Bob Receives     |
       |                            |  Listen for event          |
       |                            |  Parse unified pubKeys     |
-      |                            |  Extract DerivationProof   |
+      |                            |  Extract IdentityProof     |
       |                            |  Verify Alice's identity   |
       |                            |                            |
       |                            |  PHASE 3: Bob Responds     |
@@ -95,8 +97,8 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |                            |  Secure message delivered  |
       |----------------------------|----------------------------|
       |  Key Security:                                          |
-      |   - Forward Secrecy (fresh ephemeral keys per message) |
-      |   - Identity Verification (derivation proofs)          |
+      |   - Forward Secrecy (fresh ephemeral keys per message)  |
+      |   - Identity Verification                               |
       |   - Address Binding                                     |
       |   - Unified Key Management                              |
 ```

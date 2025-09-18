@@ -6,7 +6,7 @@ import {
   respondToHandshake,
   IExecutor,
   IdentityKeyPair,
-  DerivationProof,
+  IdentityProof,
   getNextNonce,
 } from "@verbeth/sdk";
 import {
@@ -23,7 +23,7 @@ interface UseChatActionsProps {
   signer: any;
   executor: IExecutor | null;
   identityKeyPair: IdentityKeyPair | null;
-  derivationProof: DerivationProof | null;
+  identityProof: IdentityProof | null;
   addLog: (message: string) => void;
   updateContact: (contact: Contact) => Promise<void>;
   addMessage: (message: any) => Promise<void>;
@@ -41,7 +41,7 @@ export const useChatActions = ({
   signer,
   executor,
   identityKeyPair,
-  derivationProof,
+  identityProof,
   addLog,
   updateContact,
   addMessage,
@@ -70,7 +70,7 @@ export const useChatActions = ({
         !recipientAddress ||
         !message ||
         !identityKeyPair ||
-        !derivationProof ||
+        !identityProof ||
         !currentSigner
       ) {
         addLog("✗ Missing required data for handshake");
@@ -87,7 +87,7 @@ export const useChatActions = ({
           identityKeyPair,
           ephemeralPubKey: ephemeralKeyPair.publicKey,
           plaintextPayload: message,
-          derivationProof,
+          identityProof,
           signer: currentSigner,
         });
 
@@ -149,7 +149,7 @@ export const useChatActions = ({
       baseAddress,
       executor,
       identityKeyPair,
-      derivationProof,
+      identityProof,
       getCurrentSigner,
       addLog,
       updateContact,
@@ -170,7 +170,7 @@ export const useChatActions = ({
         !executor ||
         !currentAddress ||
         !identityKeyPair ||
-        !derivationProof ||
+        !identityProof ||
         !currentSigner
       ) {
         addLog("✗ Missing required data for handshake response");
@@ -184,7 +184,7 @@ export const useChatActions = ({
           initiatorPubKey: handshake.ephemeralPubKey,
           responderIdentityKeyPair: identityKeyPair,
           note: responseMessage,
-          derivationProof,
+          identityProof,
           signer: currentSigner,
         });
 
@@ -247,7 +247,7 @@ export const useChatActions = ({
       baseAddress,
       executor,
       identityKeyPair,
-      derivationProof,
+      identityProof,
       getCurrentSigner,
       addLog,
       updateContact,

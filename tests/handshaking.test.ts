@@ -157,7 +157,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       identityKeyPair: ownerIdentityKeys.keyPair,
       ephemeralPubKey: ephemeralKeys.publicKey,
       plaintextPayload: "Hello from initiator smart account!",
-      derivationProof: ownerIdentityKeys.derivationProof,
+      identityProof: ownerIdentityKeys.identityProof,
       signer: smartAccountOwner,
     });
 
@@ -181,7 +181,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       initiatorPubKey: ownerIdentityKeys.keyPair.publicKey,
       responderIdentityKeyPair: responderIdentityKeys.keyPair,
       note: "Hello back from responder smart account!",
-      derivationProof: responderIdentityKeys.derivationProof,
+      identityProof: responderIdentityKeys.identityProof,
       signer: responderOwner,
     });
 
@@ -226,7 +226,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
         identityKeyPair: ownerIdentityKeys.keyPair,
         ephemeralPubKey: ephemeralKeys.publicKey,
         plaintextPayload: `Batch handshake ${i + 1}`,
-        derivationProof: ownerIdentityKeys.derivationProof,
+        identityProof: ownerIdentityKeys.identityProof,
         signer: smartAccountOwner,
       });
 
@@ -248,7 +248,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
         initiatorPubKey: ownerIdentityKeys.keyPair.publicKey,
         responderIdentityKeyPair: responderIdentityKeys.keyPair,
         note: `Batch response ${i + 1}`,
-        derivationProof: responderIdentityKeys.derivationProof,
+        identityProof: responderIdentityKeys.identityProof,
         signer: responderOwner,
       });
 
@@ -292,7 +292,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       initiatorPubKey: ownerIdentityKeys.keyPair.publicKey,
       responderIdentityKeyPair: responderIdentityKeys.keyPair,
       note: "Response to non-existent handshake",
-      derivationProof: responderIdentityKeys.derivationProof,
+      identityProof: responderIdentityKeys.identityProof,
       signer: responderOwner,
     });
 
@@ -331,7 +331,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
         identityKeyPair: ownerIdentityKeys.keyPair,
         ephemeralPubKey: ephemeralKeys.publicKey,
         plaintextPayload: `Note length test ${i + 1}`,
-        derivationProof: ownerIdentityKeys.derivationProof,
+        identityProof: ownerIdentityKeys.identityProof,
         signer: smartAccountOwner,
       });
 
@@ -344,7 +344,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
         initiatorPubKey: ownerIdentityKeys.keyPair.publicKey,
         responderIdentityKeyPair: responderIdentityKeys.keyPair,
         note,
-        derivationProof: responderIdentityKeys.derivationProof,
+        identityProof: responderIdentityKeys.identityProof,
         signer: responderOwner,
       });
 
@@ -362,7 +362,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       identityKeyPair: ownerIdentityKeys.keyPair,
       ephemeralPubKey: ephemeralKeys.publicKey,
       plaintextPayload: "Identity verification test handshake",
-      derivationProof: ownerIdentityKeys.derivationProof,
+      identityProof: ownerIdentityKeys.identityProof,
       signer: smartAccountOwner,
     });
 
@@ -405,7 +405,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       identityKeyPair: ownerIdentityKeys.keyPair,
       ephemeralPubKey: aliceEphemeralKeys.publicKey,
       plaintextPayload: "Response identity verification test",
-      derivationProof: ownerIdentityKeys.derivationProof,
+      identityProof: ownerIdentityKeys.identityProof,
       signer: smartAccountOwner,
     });
 
@@ -432,7 +432,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       initiatorPubKey: aliceEphemeralPubKeyFromEvent,
       responderIdentityKeyPair: responderIdentityKeys.keyPair,
       note: "Response identity verification test",
-      derivationProof: responderIdentityKeys.derivationProof,
+      identityProof: responderIdentityKeys.identityProof,
       signer: responderOwner,
     });
 
@@ -465,7 +465,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
     expect(isValidResponse).toBe(true);
   }, 30000);
 
-  it("should fail handshake identity verification with invalid derivation proof", async () => {
+  it("should fail handshake identity verification with invalid identity proof", async () => {
     const ephemeralKeys = nacl.box.keyPair();
 
     const invalidWallet = new Wallet(
@@ -473,10 +473,10 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       provider
     );
 
-    const invalidMessage = "Invalid derivation message";
+    const invalidMessage = "Invalid identity message";
     const invalidSignature = await invalidWallet.signMessage(invalidMessage);
 
-    const invalidDerivationProof = {
+    const invalidIdentityProof = {
       message: invalidMessage,
       signature: invalidSignature,
     };
@@ -487,7 +487,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       identityKeyPair: ownerIdentityKeys.keyPair,
       ephemeralPubKey: ephemeralKeys.publicKey,
       plaintextPayload: "Invalid identity verification test",
-      derivationProof: invalidDerivationProof,
+      identityProof: invalidIdentityProof,
       signer: smartAccountOwner,
     });
 
@@ -529,7 +529,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       identityKeyPair: ownerIdentityKeys.keyPair,
       ephemeralPubKey: aliceEphemeralKeys.publicKey,
       plaintextPayload: "Wrong identity key test",
-      derivationProof: ownerIdentityKeys.derivationProof,
+      identityProof: ownerIdentityKeys.identityProof,
       signer: smartAccountOwner,
     });
 
@@ -542,7 +542,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       initiatorPubKey: ownerIdentityKeys.keyPair.publicKey,
       responderIdentityKeyPair: responderIdentityKeys.keyPair,
       note: "Wrong identity key test response",
-      derivationProof: responderIdentityKeys.derivationProof,
+      identityProof: responderIdentityKeys.identityProof,
       signer: responderOwner,
     });
 
@@ -594,7 +594,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
         identityKeyPair: ownerIdentityKeys.keyPair,
         ephemeralPubKey: aliceEphemeralKeys.publicKey,
         plaintextPayload: `Batch verification test ${i + 1}`,
-        derivationProof: ownerIdentityKeys.derivationProof,
+        identityProof: ownerIdentityKeys.identityProof,
         signer: smartAccountOwner,
       });
 
@@ -631,7 +631,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
         initiatorPubKey: aliceEphemeralPubKeyFromEvent,
         responderIdentityKeyPair: responderIdentityKeys.keyPair,
         note: `Batch verification response ${i + 1}`,
-        derivationProof: responderIdentityKeys.derivationProof,
+        identityProof: responderIdentityKeys.identityProof,
         signer: responderOwner,
       });
 

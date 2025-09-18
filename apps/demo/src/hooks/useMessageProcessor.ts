@@ -134,22 +134,22 @@ export const useMessageProcessor = ({
         const recipientHash = log.topics[1];
 
         let handshakeContent;
-        let hasValidDerivationProof = false;
+        let hasValidIdentityProof = false;
 
         try {
           handshakeContent = parseHandshakePayload(plaintextPayload);
-          hasValidDerivationProof = true;
+          hasValidIdentityProof = true;
         } catch (error) {
           handshakeContent = {
             plaintextPayload: plaintextPayload,
-            derivationProof: null,
+            identityProof: null,
           };
-          hasValidDerivationProof = false;
+          hasValidIdentityProof = false;
         }
 
-        // Verify identity if we have a valid derivation proof
+        // Verify identity if we have a valid identity proof
         let isVerified = false;
-        if (hasValidDerivationProof) {
+        if (hasValidIdentityProof) {
           try {
             const handshakeEvent = {
               recipientHash,

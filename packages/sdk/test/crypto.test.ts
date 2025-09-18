@@ -21,7 +21,7 @@ import {
   extractKeysFromHandshakeResponse,
   parseHandshakeKeys
 } from '../src/payload.js';
-import { DerivationProof } from '../src/types.js';
+import { IdentityProof } from '../src/types.js';
 import type { LogMessage } from '../src/types.js';
 
 describe('Encryption/Decryption', () => {
@@ -173,8 +173,8 @@ describe('Encryption/Decryption', () => {
       const ephemeralPubKey = new Uint8Array(32).fill(4);
       const note = 'here is my response';
       
-      const derivationProof: DerivationProof = {
-        message: 'VerbEth Identity Key Derivation v1\nAddress: 0x1234...',
+      const identityProof: IdentityProof = {
+        message: 'VerbEth Identity Key Identity v1\nAddress: 0x1234...',
         signature: '0x' + '1'.repeat(130)
       };
 
@@ -182,7 +182,7 @@ describe('Encryption/Decryption', () => {
         unifiedPubKeys,      
         ephemeralPubKey,
         note,
-        derivationProof     
+        identityProof     
       };
 
       const encrypted = encryptStructuredPayload(
@@ -201,10 +201,10 @@ describe('Encryption/Decryption', () => {
       expect(decrypted!.unifiedPubKeys).toEqual(unifiedPubKeys);  
       expect(decrypted!.ephemeralPubKey).toEqual(ephemeralPubKey);
       expect(decrypted!.note).toBe(note);
-      expect(decrypted!.derivationProof).toEqual(derivationProof); 
+      expect(decrypted!.identityProof).toEqual(identityProof); 
     });
 
-    it('should handle handshake response with derivation proof', () => {
+    it('should handle handshake response with identity proof', () => {
       const initiatorEphemeralKey = nacl.box.keyPair();
       const responderEphemeralKey = nacl.box.keyPair();
       
@@ -214,16 +214,16 @@ describe('Encryption/Decryption', () => {
       
       const ephemeralPubKey = new Uint8Array(32).fill(6);
       
-      const derivationProof: DerivationProof = {
-        message: 'VerbEth Identity Key Derivation v1\nAddress: 0xabcd...',
+      const identityProof: IdentityProof = {
+        message: 'VerbEth Identity Key identity v1\nAddress: 0xabcd...',
         signature: '0x' + '2'.repeat(130)
       };
 
       const responseContent: HandshakeResponseContent = {
         unifiedPubKeys,    
         ephemeralPubKey,
-        note: 'with derivation proof',
-        derivationProof      
+        note: 'with identity proof',
+        identityProof      
       };
 
       const encrypted = encryptStructuredPayload(
@@ -239,7 +239,7 @@ describe('Encryption/Decryption', () => {
       );
 
       expect(decrypted).not.toBeNull();
-      expect(decrypted!.derivationProof).toEqual(derivationProof);  
+      expect(decrypted!.identityProof).toEqual(identityProof);  
     });
   });
 
@@ -254,8 +254,8 @@ describe('Encryption/Decryption', () => {
       const ephemeralPubKey = new Uint8Array(32).fill(12);
       const note = 'convenience function test';
       
-      const derivationProof: DerivationProof = {
-        message: 'VerbEth Identity Key Derivation v1\nAddress: 0xtest...',
+      const identityProof: IdentityProof = {
+        message: 'VerbEth Identity Key Identity v1\nAddress: 0xtest...',
         signature: '0x' + '3'.repeat(130)
       };
 
@@ -263,7 +263,7 @@ describe('Encryption/Decryption', () => {
         unifiedPubKeys,
         ephemeralPubKey,
         note,
-        derivationProof
+        identityProof
       };
 
       const encrypted = encryptStructuredPayload(
@@ -283,7 +283,7 @@ describe('Encryption/Decryption', () => {
       expect(result!.signingPubKey).toEqual(signingPubKey);
       expect(result!.ephemeralPubKey).toEqual(ephemeralPubKey);
       expect(result!.note).toBe(note);
-      expect(result!.derivationProof).toEqual(derivationProof);
+      expect(result!.identityProof).toEqual(identityProof);
     });
 
     it('should return null for invalid encrypted data', () => {
@@ -315,7 +315,7 @@ describe('Encryption/Decryption', () => {
       const signingPubKey = new Uint8Array(32).fill(14);
       const unifiedPubKeys = encodeUnifiedPubKeys(identityPubKey, signingPubKey);
       
-      const derivationProof: DerivationProof = {
+      const identityProof: IdentityProof = {
         message: 'Wrong key test',
         signature: '0x' + '4'.repeat(130)
       };
@@ -324,7 +324,7 @@ describe('Encryption/Decryption', () => {
         unifiedPubKeys,
         ephemeralPubKey: new Uint8Array(32).fill(15),
         note: 'should fail',
-        derivationProof
+        identityProof
       };
 
       const encrypted = encryptStructuredPayload(
@@ -370,7 +370,7 @@ describe('Encryption/Decryption', () => {
       const ephemeralPubKey = new Uint8Array(32).fill(27);
       const unifiedPubKeys = encodeUnifiedPubKeys(identityPubKey, signingPubKey);
       
-      const derivationProof: DerivationProof = {
+      const identityProof: IdentityProof = {
         message: 'Extract test',
         signature: '0x' + '5'.repeat(130)
       };
@@ -379,7 +379,7 @@ describe('Encryption/Decryption', () => {
         unifiedPubKeys,
         ephemeralPubKey,
         note: 'extract test',
-        derivationProof
+        identityProof
       };
 
       const extracted = extractKeysFromHandshakeResponse(content);
@@ -406,7 +406,7 @@ describe('Encryption/Decryption', () => {
     it('should return null for invalid unified keys in response content', () => {
       const invalidUnifiedKeys = new Uint8Array(30).fill(1); // Wrong size
       
-      const derivationProof: DerivationProof = {
+      const identityProof: IdentityProof = {
         message: 'Invalid test',
         signature: '0x' + '6'.repeat(130)
       };
@@ -415,7 +415,7 @@ describe('Encryption/Decryption', () => {
         unifiedPubKeys: invalidUnifiedKeys,
         ephemeralPubKey: new Uint8Array(32).fill(2),
         note: 'invalid test',
-        derivationProof
+        identityProof
       };
 
       const extracted = extractKeysFromHandshakeResponse(content);
@@ -555,11 +555,11 @@ describe('Encryption/Decryption', () => {
       }).toThrow('Converter error');
     });
 
-    it('should throw error for decryptHandshakeResponse with missing derivationProof', () => {
+    it('should throw error for decryptHandshakeResponse with missing identityProof', () => {
       const initiatorEphemeralKey = nacl.box.keyPair();
       const responderEphemeralKey = nacl.box.keyPair();
       
-      // Create content without derivationProof
+      // Create content without identityProof
       const invalidContent = {
         unifiedPubKeys: encodeUnifiedPubKeys(
           new Uint8Array(32).fill(40),
@@ -567,7 +567,7 @@ describe('Encryption/Decryption', () => {
         ),
         ephemeralPubKey: new Uint8Array(32).fill(42),
         note: 'missing proof'
-        // No derivationProof
+        // No identityProof
       };
 
       const encrypted = encryptStructuredPayload(
@@ -582,7 +582,7 @@ describe('Encryption/Decryption', () => {
           encrypted,
           initiatorEphemeralKey.secretKey
         );
-      }).toThrow('Invalid handshake response: missing derivationProof');
+      }).toThrow('Invalid handshake response: missing identityProof');
     });
   });
 
@@ -614,8 +614,8 @@ describe('Encryption/Decryption', () => {
       const ephemeralPubKey = new Uint8Array(32).fill(4);
       const note = 'here is my response';
       
-      const derivationProof: DerivationProof = {
-        message: 'VerbEth Identity Key Derivation v1\nAddress: 0xtest...',
+      const identityProof: IdentityProof = {
+        message: 'VerbEth Identity Key Identity v1\nAddress: 0xtest...',
         signature: '0x' + '3'.repeat(130)
       };
 
@@ -623,7 +623,7 @@ describe('Encryption/Decryption', () => {
         unifiedPubKeys,      
         ephemeralPubKey,
         note,
-        derivationProof    
+        identityProof    
       };
 
       const encoded = encodeHandshakeResponseContent(content);
@@ -632,7 +632,7 @@ describe('Encryption/Decryption', () => {
       expect(decoded.unifiedPubKeys).toEqual(unifiedPubKeys); 
       expect(decoded.ephemeralPubKey).toEqual(ephemeralPubKey);
       expect(decoded.note).toBe(note);
-      expect(decoded.derivationProof).toEqual(derivationProof);  
+      expect(decoded.identityProof).toEqual(identityProof);  
     });
   });
 

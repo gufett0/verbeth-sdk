@@ -1,4 +1,4 @@
-import type { IdentityKeyPair, DerivationProof } from '@verbeth/sdk';
+import type { IdentityKeyPair, IdentityProof } from '@verbeth/sdk';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 /* ------------------------------- CONSTANTS -------------------------------- */
@@ -73,8 +73,8 @@ export interface PendingHandshake {
 export interface StoredIdentity {
   address: string; // Ethereum address (primary key)
   keyPair: IdentityKeyPair; // X25519 + Ed25519 keys
-  derivedAt: number; // Timestamp of derivation
-  proof: DerivationProof; // Signature proof of ownership
+  derivedAt: number; 
+  proof: IdentityProof; // Signature proof of ownership
 }
 
 export interface AppSettings {

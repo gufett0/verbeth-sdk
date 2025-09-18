@@ -5,7 +5,7 @@ import { JsonRpcProvider } from "ethers";
 import { MessageDeduplicator, sendEncryptedMessage } from "../src/index.js";
 import { getNextNonce } from "../src/utils/nonce.js";
 import { convertPublicKeyToX25519 } from "../src/utils/x25519.js";
-import { isSmartContract1271 } from "../src/utils.js";
+import { isSmartContract1271, parseBindingMessage } from "../src/utils.js";
 import { ExecutorFactory } from "../src/index.js";
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
 
@@ -20,10 +20,6 @@ const fakeProvider = {
     return name;
   },
 } as unknown as JsonRpcProvider;
-
-// --- mock ethers.Contract to control behavior per ABI variant ---
-let behavior4: (() => Promise<any>) | null = null;
-let behavior3: (() => Promise<any>) | null = null;
 
 describe("MessageDeduplicator", () => {
   it("detects duplicates and enforces maxSize", () => {
@@ -132,5 +128,61 @@ describe("Unified Keys Utilities", () => {
   it("should handle unified key operations", () => {
     expect(typeof isSmartContract1271).toBe("function");
     expect(typeof sendEncryptedMessage).toBe("function");
+  });
+});
+
+describe("parseBindingMessage", () => {
+  it("parses a well-formed binding message", () => {
+    const msg = [
+      "VerbEth Key Binding v1",
+      "Address: 0x1234567890abcdef1234567890abcdef12345678",
+      "PkEd25519: 0x" + "11".repeat(32),
+      "PkX25519: 0x" + "22".repeat(32),
+      "Context: verbeth",
+      "Version: 1",
+      "ChainId: 8453",
+      "RpId: example.com",
+    ].join("\n");
+
+    const parsed = parseBindingMessage(msg);
+
+    expect(parsed.header).toBe("VerbEth Key Binding v1");
+    expect(parsed.address?.toLowerCase()).toBe("0x1234567890abcdef1234567890abcdef12345678");
+    expect(parsed.pkEd25519).toBe("0x" + "11".repeat(32));
+    expect(parsed.pkX25519).toBe("0x" + "22".repeat(32));
+    expect(parsed.context).toBe("verbeth");
+    expect(parsed.version).toBe("1");
+    expect(parsed.chainId).toBe(8453);
+    expect(parsed.rpId).toBe("example.com");
+  });
+
+  it("handles missing optional fields", () => {
+    const msg = [
+      "VerbEth Key Binding v1",
+      "Address: 0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    ].join("\n");
+
+    const parsed = parseBindingMessage(msg);
+
+    expect(parsed.header).toBe("VerbEth Key Binding v1");
+    expect(parsed.address?.toLowerCase()).toBe("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd");
+
+    expect(parsed.pkEd25519).toBeUndefined();
+    expect(parsed.pkX25519).toBeUndefined();
+    expect(parsed.context).toBeUndefined();
+    expect(parsed.version).toBeUndefined();
+    expect(parsed.chainId).toBeUndefined();
+    expect(parsed.rpId).toBeUndefined();
+  });
+
+  it("ignores lines without ':'", () => {
+    const msg = [
+      "VerbEth Key Binding v1",
+      "This line has no colon",
+      "Address: 0x1234567890abcdef1234567890abcdef12345678",
+    ].join("\n");
+
+    const parsed = parseBindingMessage(msg);
+    expect(parsed.address?.toLowerCase()).toBe("0x1234567890abcdef1234567890abcdef12345678");
   });
 });

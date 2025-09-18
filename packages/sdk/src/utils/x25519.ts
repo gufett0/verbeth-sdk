@@ -1,4 +1,4 @@
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '@noble/hashes/sha2';
 
 /**
  * Converts a 64-byte raw secp256k1 public key into a 32-byte x25519-compatible public key.

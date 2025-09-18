@@ -11,7 +11,7 @@ import {
   respondToHandshake
 } from "../src/index.js";
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
-import { IdentityKeyPair, DerivationProof } from "../src/types.js";
+import { IdentityKeyPair, IdentityProof } from "../src/types.js";
 
 const TEST_SMART_ACCOUNT_ADDRESS = "0x" + "12".repeat(20);
 const TEST_ENTRYPOINT_ADDRESS = "0x" + "45".repeat(20);
@@ -61,8 +61,8 @@ const testIdentityKeyPair: IdentityKeyPair = {
   signingPublicKey: new Uint8Array(32).fill(3),
   signingSecretKey: new Uint8Array(32).fill(4),
 };
-const testDerivationProof: DerivationProof = {
-  message: "Test derivation proof",
+const testIdentityProof: IdentityProof = {
+  message: "Test identity proof",
   signature: "0x" + "1".repeat(130),
 };
 
@@ -219,7 +219,7 @@ describe("initiateHandshake with Executors", () => {
       identityKeyPair: testIdentityKeyPair,
       ephemeralPubKey: nacl.box.keyPair().publicKey,
       plaintextPayload: "Hello Bob from EOA",
-      derivationProof: testDerivationProof,
+      identityProof: testIdentityProof,
       signer: mockSigner,
     });
     
@@ -247,7 +247,7 @@ describe("initiateHandshake with Executors", () => {
       identityKeyPair: testIdentityKeyPair,
       ephemeralPubKey: nacl.box.keyPair().publicKey,
       plaintextPayload: "Hello Bob from UserOp",
-      derivationProof: testDerivationProof,
+      identityProof: testIdentityProof,
       signer: mockSigner,
     });
     
@@ -271,7 +271,7 @@ describe("initiateHandshake with Executors", () => {
       identityKeyPair: testIdentityKeyPair,
       ephemeralPubKey: nacl.box.keyPair().publicKey,
       plaintextPayload: "Hello Bob from DirectEntryPoint",
-      derivationProof: testDerivationProof,
+      identityProof: testIdentityProof,
       signer: mockSigner,
     });
     
@@ -295,7 +295,7 @@ describe("respondToHandshake with Executors", () => {
       initiatorPubKey: testRecipientKey.publicKey,
       responderIdentityKeyPair: testIdentityKeyPair,
       note: "Response from EOA",
-      derivationProof: testDerivationProof,
+      identityProof: testIdentityProof,
       signer: mockSigner,
     });
     
@@ -321,7 +321,7 @@ describe("respondToHandshake with Executors", () => {
       initiatorPubKey: testRecipientKey.publicKey,
       responderIdentityKeyPair: testIdentityKeyPair,
       note: "Response from UserOp",
-      derivationProof: testDerivationProof,
+      identityProof: testIdentityProof,
       signer: mockSigner,
     });
     
@@ -345,7 +345,7 @@ describe("respondToHandshake with Executors", () => {
       initiatorPubKey: testRecipientKey.publicKey,
       responderIdentityKeyPair: testIdentityKeyPair,
       note: "Response from DirectEntryPoint",
-      derivationProof: testDerivationProof,
+      identityProof: testIdentityProof,
       signer: mockSigner,
     });
     
@@ -364,7 +364,7 @@ describe("respondToHandshake with Executors", () => {
       responderIdentityKeyPair: testIdentityKeyPair,
       // No responderEphemeralKeyPair provided
       note: "Auto-generated ephemeral key",
-      derivationProof: testDerivationProof,
+      identityProof: testIdentityProof,
       signer: mockSigner,
     });
     

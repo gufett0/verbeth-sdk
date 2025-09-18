@@ -177,7 +177,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         identityKeyPair: smartAccountIdentityKeys.keyPair,
         ephemeralPubKey: ephemeralKeys.publicKey,
         plaintextPayload: "Hello EOA from Smart Account!",
-        derivationProof: smartAccountIdentityKeys.derivationProof,
+        identityProof: smartAccountIdentityKeys.identityProof,
         signer: smartAccountOwner,
       });
 
@@ -222,7 +222,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         initiatorPubKey: ephemeralKeys.publicKey,
         responderIdentityKeyPair: eoaAccount1IdentityKeys.keyPair,
         note: "Hello back from EOA!",
-        derivationProof: eoaAccount1IdentityKeys.derivationProof,
+        identityProof: eoaAccount1IdentityKeys.identityProof,
         signer: eoaAccount1.signer as Wallet,
       });
 
@@ -393,7 +393,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         identityKeyPair: eoaAccount1IdentityKeys.keyPair,
         ephemeralPubKey: ephemeralKeys.publicKey,
         plaintextPayload: "Hello Smart Account from EOA!",
-        derivationProof: eoaAccount1IdentityKeys.derivationProof,
+        identityProof: eoaAccount1IdentityKeys.identityProof,
         signer: eoaAccount1.signer as Wallet,
       });
 
@@ -438,7 +438,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         initiatorPubKey: ephemeralKeys.publicKey,
         responderIdentityKeyPair: smartAccountIdentityKeys.keyPair,
         note: "Hello back from Smart Account!",
-        derivationProof: smartAccountIdentityKeys.derivationProof,
+        identityProof: smartAccountIdentityKeys.identityProof,
         signer: smartAccountOwner,
       });
 
@@ -636,7 +636,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         identityKeyPair: smartAccountIdentityKeys.keyPair,
         ephemeralPubKey: ephemeralKeys.publicKey,
         plaintextPayload: "Hello from first Smart Account!",
-        derivationProof: smartAccountIdentityKeys.derivationProof,
+        identityProof: smartAccountIdentityKeys.identityProof,
         signer: smartAccountOwner,
       });
 
@@ -681,7 +681,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         initiatorPubKey: ephemeralKeys.publicKey,
         responderIdentityKeyPair: secondSmartAccountIdentityKeys.keyPair,
         note: "Hello back from second Smart Account!",
-        derivationProof: secondSmartAccountIdentityKeys.derivationProof,
+        identityProof: secondSmartAccountIdentityKeys.identityProof,
         signer: eoaAccount1.signer as Wallet,
       });
 
@@ -852,7 +852,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         identityKeyPair: eoaAccount1IdentityKeys.keyPair,
         ephemeralPubKey: ephemeralKeys.publicKey,
         plaintextPayload: "Hello from first EOA!",
-        derivationProof: eoaAccount1IdentityKeys.derivationProof,
+        identityProof: eoaAccount1IdentityKeys.identityProof,
         signer: eoaAccount1.signer as Wallet,
       });
 
@@ -897,7 +897,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         initiatorPubKey: ephemeralKeys.publicKey,
         responderIdentityKeyPair: eoaAccount2IdentityKeys.keyPair,
         note: "Hello back from second EOA!",
-        derivationProof: eoaAccount2IdentityKeys.derivationProof,
+        identityProof: eoaAccount2IdentityKeys.identityProof,
         signer: eoaAccount2.signer as Wallet,
       });
 

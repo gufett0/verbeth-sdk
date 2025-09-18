@@ -13,7 +13,7 @@ import {
   ExecutorFactory,
   deriveIdentityKeyPairWithProof,
   IdentityKeyPair,
-  DerivationProof,
+  IdentityProof,
 } from '@verbeth/sdk';
 import { useMessageListener } from './hooks/useMessageListener.js';
 import { useMessageProcessor } from './hooks/useMessageProcessor.js';
@@ -51,7 +51,7 @@ export default function App() {
   const [showToast, setShowToast] = useState(false);
 
   const [identityKeyPair, setIdentityKeyPair] = useState<IdentityKeyPair | null>(null);
-  const [derivationProof, setDerivationProof] = useState<DerivationProof | null>(null);
+  const [identityProof, setIdentityProof] = useState<IdentityProof | null>(null);
   const [executor, setExecutor] = useState<IExecutor | null>(null);
   const [contract, setContract] = useState<LogChainV1 | null>(null);
   const [signer, setSigner] = useState<any>(null);
@@ -95,13 +95,13 @@ export default function App() {
         const result = await deriveIdentityKeyPairWithProof(signer, address);
 
         setIdentityKeyPair(result.keyPair);
-        setDerivationProof(result.derivationProof);
+        setIdentityProof(result.identityProof);
 
         const identityToStore: StoredIdentity = {
           address: address,
           keyPair: result.keyPair,
           derivedAt: Date.now(),
-          proof: result.derivationProof
+          proof: result.identityProof
         };
 
         await dbService.saveIdentity(identityToStore);
@@ -129,16 +129,16 @@ export default function App() {
 
         const result = await deriveIdentityKeyPairWithProof(signer, baseAddress);
 
-        console.log("!!!!Debug🔑 [createIdentity] derivationProof:", result.derivationProof);
+        console.log("!!!!Debug🔑 [createIdentity] identityProof:", result.identityProof);
 
         setIdentityKeyPair(result.keyPair);
-        setDerivationProof(result.derivationProof);
+        setIdentityProof(result.identityProof);
 
         const identityToStore: StoredIdentity = {
           address: baseAddress,
           keyPair: result.keyPair,
           derivedAt: Date.now(),
-          proof: result.derivationProof
+          proof: result.identityProof
         };
 
         await dbService.saveIdentity(identityToStore);
@@ -200,7 +200,7 @@ export default function App() {
     signer,
     executor,
     identityKeyPair,
-    derivationProof,
+    identityProof,
     addLog,
     updateContact: async (contact: Contact) => { await updateContact(contact); },
     addMessage: async (message: any) => { await addMessage(message); },
@@ -316,7 +316,7 @@ export default function App() {
 
   const switchToAccount = async (newAddress: string) => {
     setIdentityKeyPair(null);
-    setDerivationProof(null);
+    setIdentityProof(null);
     setSelectedContact(null);
 
     await dbService.switchAccount(newAddress);
@@ -325,7 +325,7 @@ export default function App() {
     const storedIdentity = await dbService.getIdentity(newAddress);
     if (storedIdentity) {
       setIdentityKeyPair(storedIdentity.keyPair);
-      setDerivationProof(storedIdentity.proof ?? null);
+      setIdentityProof(storedIdentity.proof ?? null);
       setNeedsIdentityCreation(false);
       addLog(`Identity keys restored from database`);
     } else {
@@ -336,7 +336,7 @@ export default function App() {
   const resetState = () => {
     setCurrentAccount(null);
     setIdentityKeyPair(null);
-    setDerivationProof(null);
+    setIdentityProof(null);
     setSelectedContact(null);
     setSigner(null);
     setContract(null);
@@ -424,8 +424,8 @@ export default function App() {
 
 
   // const handleVerifyMessage = useCallback(async () => {
-  //   if (!viemClient || !derivationProof) {
-  //     addLog("⚠ Missing viem client or derivation proof for verification");
+  //   if (!viemClient || !identityProof) {
+  //     addLog("⚠ Missing viem client or identity proof for verification");
   //     return;
   //   }
   //   const currentAddress = address || baseAddress;
@@ -437,7 +437,7 @@ export default function App() {
   //   setLoading(true);
   //   try {
   //     addLog("🔍 Verifying stored identity proof...");
-  //     const { message, signature } = derivationProof;
+  //     const { message, signature } = identityProof;
 
   //     const ok = await viemClient.verifyMessage({
   //       address: currentAddress as `0x${string}`,
@@ -454,7 +454,7 @@ export default function App() {
   //   } finally {
   //     setLoading(false);
   //   }
-  // }, [viemClient, derivationProof, address, baseAddress, addLog]);
+  // }, [viemClient, identityProof, address, baseAddress, addLog]);
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -536,7 +536,7 @@ export default function App() {
             <CelebrationToast show={showToast} onClose={() => setShowToast(false)} />
 
             {/* Identity Proof Verification Section
-            {ready && (isConnected || isBaseConnected) && !needsIdentityCreation && derivationProof && (
+            {ready && (isConnected || isBaseConnected) && !needsIdentityCreation && identityProof && (
               <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold">Identity Proof Verification</h3>
@@ -571,13 +571,13 @@ export default function App() {
 
                   <div className="bg-gray-800 rounded p-3">
                     <p className="text-gray-400 mb-1">Stored Proof Message:</p>
-                    <p className="font-mono text-green-400 break-all">{derivationProof.message}</p>
+                    <p className="font-mono text-green-400 break-all">{identityProof.message}</p>
                   </div>
 
                   <div className="bg-gray-800 rounded p-3">
                     <p className="text-gray-400 mb-1">Stored Proof Signature:</p>
                     <p className="font-mono text-yellow-400 break-all text-xs">
-                      {derivationProof.signature}
+                      {identityProof.signature}
                     </p>
                   </div>
                 </div>

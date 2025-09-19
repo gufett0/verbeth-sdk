@@ -5,7 +5,6 @@ import { RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
 import { config } from '../config.js';
 
 
-// Custom dark theme for minimalist black and white design
 const customTheme = darkTheme({
   accentColor: '#000000',
   accentColorForeground: '#ffffff',

@@ -53,14 +53,14 @@ export function parseBindingMessage(message: string): {
 }
 
 export type Rpcish =
-  | import("ethers").JsonRpcProvider // ethers v6 RPC
-  | import("ethers").BrowserProvider // ethers v6 EIP-1193 (browser)
+  | import("ethers").JsonRpcProvider
+  | import("ethers").BrowserProvider 
   | { request: (args: { method: string; params?: any[] }) => Promise<any> }; // generic EIP-1193
 
 function toEip1193(provider: Rpcish) {
   if ((provider as any).request)
     return provider as { request: ({ method, params }: any) => Promise<any> };
-  // ethers JsonRpcProvider → shim .request
+
   if ((provider as any).send) {
     return {
       request: ({ method, params }: { method: string; params?: any[] }) =>
@@ -80,7 +80,7 @@ export async function makeViemPublicClient(
     const hex = await eip1193.request({ method: "eth_chainId" });
     chainId = Number(hex);
   } catch {
-    /* default 1 */
+
   }
 
   const chain = defineChain({

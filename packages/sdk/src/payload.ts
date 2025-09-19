@@ -292,7 +292,6 @@ export function parseHandshakeKeys(event: { pubKeys: string }): {
   signingPubKey: Uint8Array;
 } | null {
   try {
-    // Remove '0x' prefix and convert hex to bytes
     const pubKeysBytes = new Uint8Array(
       Buffer.from(event.pubKeys.slice(2), 'hex')
     );

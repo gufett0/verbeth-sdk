@@ -10,5 +10,5 @@ export function convertPublicKeyToX25519(secpPubKey: Uint8Array): Uint8Array {
   }
 
   const hash = sha256(secpPubKey);
-  return Uint8Array.from(hash.slice(0, 32)); // NaCl-compatible
+  return Uint8Array.from(hash.slice(0, 32));
 }

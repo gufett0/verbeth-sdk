@@ -32,7 +32,6 @@ export const useMessageListener = ({
   onLog,
   onEventsProcessed,
 }: UseMessageListenerProps): MessageListenerResult => {
-  // State
   const [isInitialLoading, setIsInitialLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [canLoadMore, setCanLoadMore] = useState(true);
@@ -42,11 +41,9 @@ export const useMessageListener = ({
     null
   );
 
-  // Refs
   const processedLogs = useRef(new Set<string>());
   const scanChunks = useRef<ScanChunk[]>([]);
 
-  // Helper functions
   const calculateRecipientHash = (recipientAddr: string) => {
     return keccak256(toUtf8Bytes(`contact:${recipientAddr.toLowerCase()}`));
   };
@@ -62,7 +59,7 @@ export const useMessageListener = ({
     }
   }, [address, onLog]);
 
-  // RPC helper with retry logic (unchanged)
+  // RPC helper with retry logic
   const safeGetLogs = async (
     filter: any,
     fromBlock: number,
@@ -134,7 +131,7 @@ export const useMessageListener = ({
     return [];
   };
 
-  // Smart chunking (unchanged)
+  // Smart chunking
   const findEventRanges = async (
     fromBlock: number,
     toBlock: number
@@ -186,14 +183,13 @@ export const useMessageListener = ({
     return results;
   };
 
-  // ✅ FIXED: Scan specific block range - load contacts from DB when needed
+  // Scan specific block range - load contacts from DB when needed
   const scanBlockRange = async (
     fromBlock: number,
     toBlock: number
   ): Promise<ProcessedEvent[]> => {
     if (!address) return [];
 
-    // ✅ Load fresh contacts from database
     const contacts = await getCurrentContacts();
 
     const userRecipientHash = calculateRecipientHash(address);
@@ -313,14 +309,13 @@ export const useMessageListener = ({
     return allEvents;
   };
 
-  // Initial backward scan
   const performInitialScan = useCallback(async () => {
     if (!readProvider || !address || isInitialLoading) return;
 
-    // Check if initial scan already completed for this address
+    // check if initial scan already completed for this address
     const initialScanComplete = await dbService.getInitialScanComplete(address);
     if (initialScanComplete) {
-      onLog(`✅ Initial scan already completed for ${address.slice(0, 8)}...`);
+      onLog(`Initial scan already completed for ${address.slice(0, 8)}...`);
 
       const savedLastBlock = await dbService.getLastKnownBlock();
       const savedOldestBlock = await dbService.getOldestScannedBlock();
@@ -346,7 +341,6 @@ export const useMessageListener = ({
 
       const events = await scanBlockRange(startBlock, currentBlock);
 
-      // Process events
       onEventsProcessed(events);
 
       // Store chunk info
@@ -385,7 +379,6 @@ export const useMessageListener = ({
     getCurrentContacts,
   ]);
 
-  // Lazy load more history (unchanged)
   const loadMoreHistory = useCallback(async () => {
     if (
       !readProvider ||
@@ -407,7 +400,7 @@ export const useMessageListener = ({
         CONTRACT_CREATION_BLOCK
       );
 
-      // Check if blocks are available
+      // check if blocks are available
       let maxIndexedBlock = endBlock;
       for (let b = endBlock; b >= startBlock; b--) {
         const blk = await readProvider.getBlock(b);
@@ -439,10 +432,8 @@ export const useMessageListener = ({
 
       const events = await batchScanRanges(ranges);
 
-      // Process events
       onEventsProcessed(events);
 
-      // Update chunks
       scanChunks.current.push({
         fromBlock: safeStartBlock,
         toBlock: safeEndBlock,
@@ -450,7 +441,6 @@ export const useMessageListener = ({
         events: events.map((e) => e.rawLog),
       });
 
-      // Update state and database
       setOldestScannedBlock(safeStartBlock);
       setCanLoadMore(safeStartBlock > CONTRACT_CREATION_BLOCK);
       await dbService.setOldestScannedBlock(safeStartBlock);
@@ -473,7 +463,7 @@ export const useMessageListener = ({
     onEventsProcessed,
   ]);
 
-  // Real-time scanning for new blocks (unchanged)
+  // Real-time scanning for new blocks
   useEffect(() => {
     if (!readProvider || !address || !lastKnownBlock) return;
 

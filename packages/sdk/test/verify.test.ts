@@ -5,7 +5,6 @@ import {
   keccak256,
   toUtf8Bytes,
   hexlify,
-  JsonRpcProvider,
 } from "ethers";
 import nacl from "tweetnacl";
 

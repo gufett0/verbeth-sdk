@@ -1,7 +1,7 @@
 // apps/demo/src/hooks/useMessageProcessor.ts
 
 import { useState, useEffect, useCallback } from "react";
-import { keccak256, toUtf8Bytes, AbiCoder } from "ethers";
+import { AbiCoder } from "ethers";
 import {
   decryptMessage,
   decryptHandshakeResponse,

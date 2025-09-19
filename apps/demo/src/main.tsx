@@ -5,7 +5,6 @@ import { RpcProvider } from "./rpc";
 import { Providers } from "./providers";
 import { Buffer } from "buffer";
 
-// Required for some dependencies
 if (!(window as any).Buffer) (window as any).Buffer = Buffer;
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

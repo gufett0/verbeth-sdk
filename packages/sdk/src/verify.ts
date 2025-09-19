@@ -4,8 +4,6 @@ import { decryptAndExtractHandshakeKeys } from "./crypto.js";
 import { HandshakeLog, HandshakeResponseLog, IdentityProof } from "./types.js";
 import { parseHandshakePayload, parseHandshakeKeys } from "./payload.js";
 import {
-  isSmartContract1271,
-  hasERC6492Suffix,
   Rpcish,
   makeViemPublicClient,
   parseBindingMessage,
@@ -88,7 +86,6 @@ export async function verifyHandshakeResponseIdentity(
       return false;
     }
 
-    // Verify the identity key matches expected
     if (
       !Buffer.from(extractedResponse.identityPubKey).equals(
         Buffer.from(responderIdentityPubKey)
@@ -128,16 +125,16 @@ export async function verifyHandshakeResponseIdentity(
 }
 
 /**
- * Verifica "IdentityProof" per EOA e smart accounts.
- * - Verifica la firma con viem (EOA / ERC-1271 / ERC-6492).
- * - Parsa e confronta Address e pk attese con il contenuto del message.
+ * Verify "IdentityProof" for EOAs and smart accounts.
+ * - Verifies the signature with viem (EOA / ERC-1271 / ERC-6492).
+ * - Parses and checks the expected address and public key against the message content.
  */
 export async function verifyIdentityProof(
   identityProof: IdentityProof,
   smartAccountAddress: string,
   expectedUnifiedKeys: {
-    identityPubKey: Uint8Array; // X25519 (nacl.box)
-    signingPubKey: Uint8Array; // Ed25519 (nacl.sign)
+    identityPubKey: Uint8Array; 
+    signingPubKey: Uint8Array; 
   },
   provider: Rpcish
 ): Promise<boolean> {
@@ -145,7 +142,6 @@ export async function verifyIdentityProof(
     const client = await makeViemPublicClient(provider);
     const address = smartAccountAddress as `0x${string}`;
 
-    // 1) Verifica firma sul binding message
     const okSig = await client.verifyMessage({
       address,
       message: identityProof.message,
@@ -156,16 +152,13 @@ export async function verifyIdentityProof(
       return false;
     }
 
-    // 2) Parsare il message e confrontare i campi attesi
     const parsed = parseBindingMessage(identityProof.message);
 
-    // Header opzionale ma utile
     if (parsed.header && parsed.header !== "VerbEth Key Binding v1") {
       console.error("Unexpected binding header:", parsed.header);
       return false;
     }
 
-    // Address nel messaggio deve combaciare
 
     if (
       !parsed.address ||
@@ -175,7 +168,6 @@ export async function verifyIdentityProof(
       return false;
     }
 
-    // Confronto chiavi pubbliche
     const expectedPkX = hexlify(
       expectedUnifiedKeys.identityPubKey
     ) as `0x${string}`;
@@ -192,7 +184,6 @@ export async function verifyIdentityProof(
       return false;
     }
 
-    // 3) (opzionali) enforce di context/version, se le hai incluse
     if (parsed.context && parsed.context !== "verbeth") {
       console.error("Unexpected context:", parsed.context);
       return false;
@@ -202,7 +193,6 @@ export async function verifyIdentityProof(
       return false;
     }
 
-    // (opzionale) chainId/rpId checks se presenti nel tuo message
     // if (typeof parsed.chainId === 'number' && parsed.chainId !== currentChainId) return false;
 
     return true;

@@ -1,5 +1,5 @@
 // packages/sdk/src/payload.ts
-import { DerivationProof } from './types.js'; 
+import { IdentityProof } from './types.js'; 
 
 
 export interface EncryptedPayload {
@@ -8,11 +8,6 @@ export interface EncryptedPayload {
   n: string;   // base64 of nonce
   ct: string;  // base64 of ciphertext
   sig?: string; // base64 of detached signature over (epk || n || ct)
-}
-
-export interface IdentityProof {
-  signature: string;  // The signature proving identity key ownership
-  message: string;    // The keccak256 hash of the signed message
 }
 
 // Unified message payload
@@ -28,19 +23,19 @@ export interface HandshakeResponsePayload extends EncryptedPayload {
 
 export interface HandshakeContent {
   plaintextPayload: string;
-  derivationProof: DerivationProof;  
+  identityProof: IdentityProof;  
 }
 
 export function parseHandshakePayload(plaintextPayload: string): HandshakeContent {
   try {
     const parsed = JSON.parse(plaintextPayload);
-    if (typeof parsed === 'object' && parsed.plaintextPayload && parsed.derivationProof) {
+    if (typeof parsed === 'object' && parsed.plaintextPayload && parsed.identityProof) {
       return parsed as HandshakeContent;
     }
   } catch (e) {
   }
   
-  throw new Error("Invalid handshake payload: missing derivationProof");
+  throw new Error("Invalid handshake payload: missing identityProof");
 }
 
 export function serializeHandshakeContent(content: HandshakeContent): string {
@@ -167,7 +162,7 @@ export interface HandshakeResponseContent {
   unifiedPubKeys: Uint8Array;      // 65 bytes: version + X25519 + Ed25519
   ephemeralPubKey: Uint8Array;
   note?: string;
-  derivationProof: DerivationProof;  
+  identityProof: IdentityProof;  
 }
 
 export function encodeHandshakePayload(payload: HandshakePayload): Uint8Array {
@@ -193,7 +188,7 @@ export function encodeHandshakeResponseContent(content: HandshakeResponseContent
     unifiedPubKeys: Buffer.from(content.unifiedPubKeys).toString('base64'),
     ephemeralPubKey: Buffer.from(content.ephemeralPubKey).toString('base64'),
     note: content.note,
-    derivationProof: content.derivationProof  
+    identityProof: content.identityProof  
   }));
 }
 
@@ -201,15 +196,15 @@ export function decodeHandshakeResponseContent(encoded: Uint8Array): HandshakeRe
   const json = new TextDecoder().decode(encoded);
   const parsed = JSON.parse(json);
   
-  if (!parsed.derivationProof) {
-    throw new Error("Invalid handshake response: missing derivationProof");
+  if (!parsed.identityProof) {
+    throw new Error("Invalid handshake response: missing identityProof");
   }
   
   return {
     unifiedPubKeys: Uint8Array.from(Buffer.from(parsed.unifiedPubKeys, 'base64')),
     ephemeralPubKey: Uint8Array.from(Buffer.from(parsed.ephemeralPubKey, 'base64')),
     note: parsed.note,
-    derivationProof: parsed.derivationProof
+    identityProof: parsed.identityProof
   };
 }
 
@@ -238,17 +233,17 @@ export function createHandshakeResponseContent(
   signingPubKey: Uint8Array,
   ephemeralPubKey: Uint8Array,
   note?: string,
-  derivationProof?: DerivationProof 
+  identityProof?: IdentityProof 
 ): HandshakeResponseContent {
-  if (!derivationProof) {
-    throw new Error("Derivation proof is now mandatory for handshake responses");
+  if (!identityProof) {
+    throw new Error("Identity proof is now mandatory for handshake responses");
   }
   
   return {
     unifiedPubKeys: encodeUnifiedPubKeys(identityPubKey, signingPubKey),
     ephemeralPubKey,
     note,
-    derivationProof
+    identityProof
   };
 }
 
@@ -297,7 +292,6 @@ export function parseHandshakeKeys(event: { pubKeys: string }): {
   signingPubKey: Uint8Array;
 } | null {
   try {
-    // Remove '0x' prefix and convert hex to bytes
     const pubKeysBytes = new Uint8Array(
       Buffer.from(event.pubKeys.slice(2), 'hex')
     );

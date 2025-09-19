@@ -14,7 +14,7 @@ import {
   encodeUnifiedPubKeys,
   createHandshakeResponseContent
 } from './payload.js';
-import { IdentityKeyPair, DerivationProof } from './types.js';  
+import { IdentityKeyPair, IdentityProof } from './types.js';  
 import { IExecutor } from './executor.js';
 import nacl from 'tweetnacl';
 
@@ -69,7 +69,7 @@ export async function initiateHandshake({
   identityKeyPair,
   ephemeralPubKey,
   plaintextPayload,
-  derivationProof,
+  identityProof,
   signer
 }: {
   executor: IExecutor;
@@ -77,7 +77,7 @@ export async function initiateHandshake({
   identityKeyPair: IdentityKeyPair;
   ephemeralPubKey: Uint8Array;
   plaintextPayload: string;
-  derivationProof: DerivationProof;
+  identityProof: IdentityProof;
   signer: Signer;
 }) {
   if (!executor) {
@@ -90,7 +90,7 @@ export async function initiateHandshake({
 
   const handshakeContent: HandshakeContent = {
     plaintextPayload,
-    derivationProof
+    identityProof
   };
 
   const serializedPayload = serializeHandshakeContent(handshakeContent);
@@ -120,7 +120,7 @@ export async function respondToHandshake({
   responderIdentityKeyPair,
   responderEphemeralKeyPair,
   note,
-  derivationProof,
+  identityProof,
   signer
 }: {
   executor: IExecutor;
@@ -129,7 +129,7 @@ export async function respondToHandshake({
   responderIdentityKeyPair: IdentityKeyPair;
   responderEphemeralKeyPair?: nacl.BoxKeyPair;
   note?: string;
-  derivationProof: DerivationProof;
+  identityProof: IdentityProof;
   signer: Signer;
 }) {
   if (!executor) {
@@ -143,7 +143,7 @@ export async function respondToHandshake({
     responderIdentityKeyPair.signingPublicKey, // Ed25519
     ephemeralKeyPair.publicKey,
     note,
-    derivationProof
+    identityProof
   );
   
   // Encrypt the response for the initiator

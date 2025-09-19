@@ -1,68 +1,60 @@
-import { createContext, useContext, useEffect, useState } from "react";
+import { createContext, useContext, useEffect, useState, useMemo } from "react";
 import { JsonRpcProvider } from "ethers";
+import { createPublicClient, http, fallback } from "viem";
+import { base } from "viem/chains";
 
-const RpcCtx = createContext<JsonRpcProvider | null>(null);
+
+type RpcState = {
+  ethers: JsonRpcProvider | null;
+  viem: ReturnType<typeof createPublicClient> | null;  
+};
+
+
+const RpcCtx = createContext<RpcState | null>(null);
 
 export function RpcProvider({ children }: { children: React.ReactNode }) {
-  const [readProvider, setReadProvider] = useState<JsonRpcProvider | null>(null);
-  const [isConnecting, setIsConnecting] = useState(true);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [ethersProvider, setEthersProvider] = useState<JsonRpcProvider | null>(null);
 
   useEffect(() => {
-    let isMounted = true;
-
-    const connectToRpc = async () => {
+    let mounted = true;
+    (async () => {
       try {
-        setIsConnecting(true);
-        setConnectionError(null);
-        
-        console.log("🔗 Connecting to RPC...");
-        
-        // Enable built-in polling for event listening
-        const provider = new JsonRpcProvider("https://base-rpc.publicnode.com", undefined, {
+        const p = new JsonRpcProvider("https://mainnet.base.org", undefined, {
           polling: true,
-          pollingInterval: 3000 // 3 seconds
+          pollingInterval: 3000,
         });
-        
-        // Test the connection by getting network info
-        const network = await provider.getNetwork();
-        const blockNumber = await provider.getBlockNumber();
-        
-        console.log("✅ Connected to RPC:", {
-          chainId: network.chainId.toString(),
-          name: network.name,
-          currentBlock: blockNumber
-        });
-        
-        if (isMounted) {
-          setReadProvider(provider);
-          setIsConnecting(false);
-        }
-      } catch (error) {
-        console.error("❌ Failed to connect to RPC provider:", error);
-        if (isMounted) {
-          setConnectionError(error instanceof Error ? error.message : 'Connection failed');
-          setIsConnecting(false);
-        }
+        await p.getBlockNumber(); 
+        if (mounted) setEthersProvider(p);
+      } catch (e) {
+        console.error("Ethers RPC failed:", e);
       }
-    };
-
-    connectToRpc();
-
-    return () => {
-      isMounted = false;
-    };
+    })();
+    return () => { mounted = false; };
   }, []);
 
+  const viemClient = useMemo(
+    () =>
+      createPublicClient({
+        chain: base,
+        transport: fallback([
+          http("https://mainnet.base.org"),           // rate-limited 
+          http("https://base-rpc.publicnode.com"),    
+        ]),
+      }),
+    []
+  );
+
   return (
-    <RpcCtx.Provider value={readProvider}>
+    <RpcCtx.Provider value={{ ethers: ethersProvider, viem: viemClient as any }}>
       {children}
     </RpcCtx.Provider>
   );
 }
 
-export function useRpcProvider() {
-  return useContext(RpcCtx);
+export function useRpcClients() {
+  const ctx = useContext(RpcCtx);
+  if (!ctx) throw new Error("useRpcClients must be used inside RpcProvider");
+  return ctx;
 }
 
 export function useRpcStatus() {

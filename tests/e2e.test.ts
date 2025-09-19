@@ -84,7 +84,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
 
     entryPoint = EntryPoint__factory.connect(ENTRYPOINT_ADDR, provider);
 
-    // Deploy LogChainV1 contract
     const logChainFactory = new LogChainV1__factory(deployerNM);
     const logChainImpl = await logChainFactory.deploy();
     await logChainImpl.waitForDeployment();
@@ -106,7 +105,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       deployerNM
     );
 
-    // Deploy test smart account
     const testSmartAccountFactory = new TestSmartAccount__factory(deployerNM);
     smartAccount = await testSmartAccountFactory.deploy(
       ENTRYPOINT_ADDR,
@@ -114,7 +112,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
     );
     await smartAccount.waitForDeployment();
 
-    // Fund accounts
+    // fund accounts
     await deployerNM.sendTransaction({
       to: await smartAccount.getAddress(),
       value: parseEther("1"),
@@ -128,7 +126,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       value: parseEther("1"),
     });
 
-    // Derive identity keys using the correct SDK function with full keypairs
+    // derive identity keys using the correct SDK function with full keypairs
     smartAccountIdentityKeys = await deriveIdentityKeyPairWithProof(
       smartAccountOwner,
       await smartAccount.getAddress()
@@ -144,7 +142,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       (eoaAccount2.signer as Wallet).address
     );
 
-    // Create executors
     smartAccountExecutor = ExecutorFactory.createDirectEntryPoint(
       await smartAccount.getAddress(),
       entryPoint.connect(deployer) as unknown as Contract,
@@ -177,7 +174,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         identityKeyPair: smartAccountIdentityKeys.keyPair,
         ephemeralPubKey: ephemeralKeys.publicKey,
         plaintextPayload: "Hello EOA from Smart Account!",
-        derivationProof: smartAccountIdentityKeys.derivationProof,
+        identityProof: smartAccountIdentityKeys.identityProof,
         signer: smartAccountOwner,
       });
 
@@ -222,7 +219,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         initiatorPubKey: ephemeralKeys.publicKey,
         responderIdentityKeyPair: eoaAccount1IdentityKeys.keyPair,
         note: "Hello back from EOA!",
-        derivationProof: eoaAccount1IdentityKeys.derivationProof,
+        identityProof: eoaAccount1IdentityKeys.identityProof,
         signer: eoaAccount1.signer as Wallet,
       });
 
@@ -369,7 +366,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
           );
           eoaCiphertextJson = new TextDecoder().decode(bytes);
         } catch (err) {
-          // Keep original if decoding fails
         }
       }
 
@@ -393,7 +389,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         identityKeyPair: eoaAccount1IdentityKeys.keyPair,
         ephemeralPubKey: ephemeralKeys.publicKey,
         plaintextPayload: "Hello Smart Account from EOA!",
-        derivationProof: eoaAccount1IdentityKeys.derivationProof,
+        identityProof: eoaAccount1IdentityKeys.identityProof,
         signer: eoaAccount1.signer as Wallet,
       });
 
@@ -438,7 +434,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         initiatorPubKey: ephemeralKeys.publicKey,
         responderIdentityKeyPair: smartAccountIdentityKeys.keyPair,
         note: "Hello back from Smart Account!",
-        derivationProof: smartAccountIdentityKeys.derivationProof,
+        identityProof: smartAccountIdentityKeys.identityProof,
         signer: smartAccountOwner,
       });
 
@@ -524,14 +520,12 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       // 7. Verify both messages can be decrypted
       const messageFilter = logChain.filters.MessageSent();
 
-      // Get EOA's message
       const eoaMessageEvents = await logChain.queryFilter(
         messageFilter,
         sendReceipt1.blockNumber,
         sendReceipt1.blockNumber
       );
 
-      // Get Smart Account's message
       const saMessageEvents = await logChain.queryFilter(
         messageFilter,
         sendReceipt2.blockNumber,
@@ -561,7 +555,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
           );
           eoaCiphertextJson = new TextDecoder().decode(bytes);
         } catch (err) {
-          // Keep original if decoding fails
         }
       }
 
@@ -599,7 +592,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
 
   describe("Smart Account to Smart Account", () => {
     it("should complete full handshake and bidirectional messaging flow", async () => {
-      // Deploy second smart account for this test
       const secondSmartAccount = await new TestSmartAccount__factory(
         deployerNM
       ).deploy(ENTRYPOINT_ADDR, (eoaAccount1.signer as Wallet).address);
@@ -636,7 +628,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         identityKeyPair: smartAccountIdentityKeys.keyPair,
         ephemeralPubKey: ephemeralKeys.publicKey,
         plaintextPayload: "Hello from first Smart Account!",
-        derivationProof: smartAccountIdentityKeys.derivationProof,
+        identityProof: smartAccountIdentityKeys.identityProof,
         signer: smartAccountOwner,
       });
 
@@ -681,7 +673,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         initiatorPubKey: ephemeralKeys.publicKey,
         responderIdentityKeyPair: secondSmartAccountIdentityKeys.keyPair,
         note: "Hello back from second Smart Account!",
-        derivationProof: secondSmartAccountIdentityKeys.derivationProof,
+        identityProof: secondSmartAccountIdentityKeys.identityProof,
         signer: eoaAccount1.signer as Wallet,
       });
 
@@ -767,14 +759,12 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       // 7. Verify both messages can be decrypted
       const messageFilter = logChain.filters.MessageSent();
 
-      // Get first Smart Account's message
       const sa1MessageEvents = await logChain.queryFilter(
         messageFilter,
         sendReceipt1.blockNumber,
         sendReceipt1.blockNumber
       );
 
-      // Get second Smart Account's message
       const sa2MessageEvents = await logChain.queryFilter(
         messageFilter,
         sendReceipt2.blockNumber,
@@ -805,7 +795,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
           );
           sa1CiphertextJson = new TextDecoder().decode(bytes);
         } catch (err) {
-          // Keep original if decoding fails
         }
       }
 
@@ -828,7 +817,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
           );
           sa2CiphertextJson = new TextDecoder().decode(bytes);
         } catch (err) {
-          // Keep original if decoding fails
         }
       }
 
@@ -852,7 +840,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         identityKeyPair: eoaAccount1IdentityKeys.keyPair,
         ephemeralPubKey: ephemeralKeys.publicKey,
         plaintextPayload: "Hello from first EOA!",
-        derivationProof: eoaAccount1IdentityKeys.derivationProof,
+        identityProof: eoaAccount1IdentityKeys.identityProof,
         signer: eoaAccount1.signer as Wallet,
       });
 
@@ -897,7 +885,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         initiatorPubKey: ephemeralKeys.publicKey,
         responderIdentityKeyPair: eoaAccount2IdentityKeys.keyPair,
         note: "Hello back from second EOA!",
-        derivationProof: eoaAccount2IdentityKeys.derivationProof,
+        identityProof: eoaAccount2IdentityKeys.identityProof,
         signer: eoaAccount2.signer as Wallet,
       });
 
@@ -983,14 +971,12 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       // 7. Verify both messages can be decrypted
       const messageFilter = logChain.filters.MessageSent();
 
-      // Get first EOA's message
       const eoa1MessageEvents = await logChain.queryFilter(
         messageFilter,
         sendReceipt1.blockNumber,
         sendReceipt1.blockNumber
       );
 
-      // Get second EOA's message
       const eoa2MessageEvents = await logChain.queryFilter(
         messageFilter,
         sendReceipt2.blockNumber,
@@ -1019,7 +1005,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
           );
           eoa1CiphertextJson = new TextDecoder().decode(bytes);
         } catch (err) {
-          // Keep original if decoding fails
         }
       }
 
@@ -1042,7 +1027,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
           );
           eoa2CiphertextJson = new TextDecoder().decode(bytes);
         } catch (err) {
-          // Keep original if decoding fails
         }
       }
 

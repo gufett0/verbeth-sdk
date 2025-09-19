@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { CopyIcon, Fingerprint, X } from "lucide-react";
+import { CopyIcon } from "lucide-react";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useWalletClient } from 'wagmi';
 import { useRpcClients } from './rpc.js';
-import { BrowserProvider } from "ethers";
+import { BrowserProvider, VoidSigner, hexlify, hashMessage, keccak256, toUtf8Bytes } from "ethers";
 import {
   LogChainV1__factory,
   type LogChainV1,
@@ -13,7 +13,7 @@ import {
   ExecutorFactory,
   deriveIdentityKeyPairWithProof,
   IdentityKeyPair,
-  IdentityProof,
+  DerivationProof,
 } from '@verbeth/sdk';
 import { useMessageListener } from './hooks/useMessageListener.js';
 import { useMessageProcessor } from './hooks/useMessageProcessor.js';
@@ -32,7 +32,45 @@ import { CelebrationToast } from "./components/CelebrationToast.js";
 import { createBaseAccountSDK } from '@base-org/account';
 import { SignInWithBaseButton } from '@base-org/account-ui/react';
 import { useChatActions } from './hooks/useChatActions.js';
+import {
+  createWebAuthnCredential,
+  toWebAuthnAccount,
+} from "viem/account-abstraction";
+import { createPublicClient, http } from "viem";
+import { base } from "viem/chains";
 
+// === Byte/Hex helpers ===
+export function utf8ToHex(str: string): `0x${string}` {
+  const enc = new TextEncoder().encode(str);
+  let hex = "0x";
+  for (const b of enc) hex += b.toString(16).padStart(2, "0");
+  return hex as `0x${string}`;
+}
+
+export function visualizeString(str: string): string {
+  // Mostra escape visibili: \n, \r, \t, ecc.
+  return JSON.stringify(str).slice(1, -1);
+}
+
+// hexdump compatto (primi/ultimi N)
+export function hexPreview(hex: `0x${string}`, bytes = 32): string {
+  const body = hex.slice(2);
+  const head = body.slice(0, bytes * 2);
+  const tail = body.length > bytes * 2 ? "…" : "";
+  return `0x${head}${tail} (len=${body.length / 2}B)`;
+}
+
+export function codepointsInfo(str: string, max = 64): string {
+  const cps = Array.from(str.slice(0, max)).map(c => c.codePointAt(0)!);
+  return `len=${str.length}, first ${cps.length} codepoints: [${cps.join(", ")}]`;
+}
+
+// primo indice in cui due stringhe differiscono (per debug)
+export function firstDiffIndex(a: string, b: string): number {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i++) if (a[i] !== b[i]) return i;
+  return a.length === b.length ? -1 : n;
+}
 
 
 export default function App() {
@@ -52,7 +90,7 @@ export default function App() {
   const [showToast, setShowToast] = useState(false);
 
   const [identityKeyPair, setIdentityKeyPair] = useState<IdentityKeyPair | null>(null);
-  const [identityProof, setIdentityProof] = useState<IdentityProof | null>(null);
+  const [derivationProof, setDerivationProof] = useState<DerivationProof | null>(null);
   const [executor, setExecutor] = useState<IExecutor | null>(null);
   const [contract, setContract] = useState<LogChainV1 | null>(null);
   const [signer, setSigner] = useState<any>(null);
@@ -63,6 +101,12 @@ export default function App() {
   const [baseProvider, setBaseProvider] = useState<any>(null);
   const [baseAddress, setBaseAddress] = useState<string | null>(null);
   const [isBaseConnected, setIsBaseConnected] = useState(false);
+
+  const [verificationResult, setVerificationResult] = useState<string | null>(null);
+  const [testMessage] = useState("Hello from passkey verification test!");
+  const [testSignature, setTestSignature] = useState<string | null>(null);
+  const [testVerificationResult, setTestVerificationResult] = useState<string | null>(null);
+  const [testSignerAddr, setTestSignerAddr] = useState<`0x${string}` | null>(null);
 
   const logRef = useRef<HTMLTextAreaElement>(null);
 
@@ -96,13 +140,13 @@ export default function App() {
         const result = await deriveIdentityKeyPairWithProof(signer, address);
 
         setIdentityKeyPair(result.keyPair);
-        setIdentityProof(result.identityProof);
+        setDerivationProof(result.derivationProof);
 
         const identityToStore: StoredIdentity = {
           address: address,
           keyPair: result.keyPair,
           derivedAt: Date.now(),
-          proof: result.identityProof
+          proof: result.derivationProof
         };
 
         await dbService.saveIdentity(identityToStore);
@@ -128,18 +172,20 @@ export default function App() {
       try {
         addLog("Deriving new identity key (Base Smart Account)...");
 
+
         const result = await deriveIdentityKeyPairWithProof(signer, baseAddress);
 
-        console.log("!!!!Debug🔑 [createIdentity] identityProof:", result.identityProof);
+
+        console.log("!!!!Debug🔑 [createIdentity] derivationProof:", result.derivationProof);
 
         setIdentityKeyPair(result.keyPair);
-        setIdentityProof(result.identityProof);
+        setDerivationProof(result.derivationProof);
 
         const identityToStore: StoredIdentity = {
           address: baseAddress,
           keyPair: result.keyPair,
           derivedAt: Date.now(),
-          proof: result.identityProof
+          proof: result.derivationProof
         };
 
         await dbService.saveIdentity(identityToStore);
@@ -201,7 +247,7 @@ export default function App() {
     signer,
     executor,
     identityKeyPair,
-    identityProof,
+    derivationProof,
     addLog,
     updateContact: async (contact: Contact) => { await updateContact(contact); },
     addMessage: async (message: any) => { await addMessage(message); },
@@ -317,7 +363,7 @@ export default function App() {
 
   const switchToAccount = async (newAddress: string) => {
     setIdentityKeyPair(null);
-    setIdentityProof(null);
+    setDerivationProof(null);
     setSelectedContact(null);
 
     await dbService.switchAccount(newAddress);
@@ -326,7 +372,7 @@ export default function App() {
     const storedIdentity = await dbService.getIdentity(newAddress);
     if (storedIdentity) {
       setIdentityKeyPair(storedIdentity.keyPair);
-      setIdentityProof(storedIdentity.proof ?? null);
+      setDerivationProof(storedIdentity.proof ?? null);
       setNeedsIdentityCreation(false);
       addLog(`Identity keys restored from database`);
     } else {
@@ -337,7 +383,7 @@ export default function App() {
   const resetState = () => {
     setCurrentAccount(null);
     setIdentityKeyPair(null);
-    setIdentityProof(null);
+    setDerivationProof(null);
     setSelectedContact(null);
     setSigner(null);
     setContract(null);
@@ -424,38 +470,114 @@ export default function App() {
   }, [initializeBaseSDK]);
 
 
-  // const handleVerifyMessage = useCallback(async () => {
-  //   if (!viemClient || !identityProof) {
-  //     addLog("⚠ Missing viem client or identity proof for verification");
-  //     return;
-  //   }
-  //   const currentAddress = address || baseAddress;
-  //   if (!currentAddress) {
-  //     addLog("⚠ No connected address for verification");
-  //     return;
-  //   }
+  const handleVerifyMessage = useCallback(async () => {
+    if (!viemClient || !derivationProof) {
+      addLog("⚠ Missing viem client or derivation proof for verification");
+      return;
+    }
+    const currentAddress = address || baseAddress;
+    if (!currentAddress) {
+      addLog("⚠ No connected address for verification");
+      return;
+    }
 
-  //   setLoading(true);
-  //   try {
-  //     addLog("🔍 Verifying stored identity proof...");
-  //     const { message, signature } = identityProof;
+    setLoading(true);
+    try {
+      addLog("🔍 Verifying stored identity proof...");
+      const { message, signature } = derivationProof;
 
-  //     const ok = await viemClient.verifyMessage({
-  //       address: currentAddress as `0x${string}`,
-  //       message,
-  //       signature: signature as `0x${string}`,
-  //     });
+      // ✅ usa l'Action: copre EOA + Smart Account (1271) + pre-deploy (6492/8010)
+      const ok = await viemClient.verifyMessage({
+        address: currentAddress as `0x${string}`,
+        message,
+        signature: signature as `0x${string}`,
+      });
 
-  //     setVerificationResult(ok ? "valid" : "invalid");
-  //     addLog(`✅ Identity proof verification: ${ok ? "VALID" : "INVALID"}`);
-  //   } catch (e: any) {
-  //     console.error(e);
-  //     setVerificationResult("invalid");
-  //     addLog(`⚠ Verification failed: ${e?.message ?? e}`);
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // }, [viemClient, identityProof, address, baseAddress, addLog]);
+      setVerificationResult(ok ? "valid" : "invalid");
+      addLog(`✅ Identity proof verification: ${ok ? "VALID" : "INVALID"}`);
+    } catch (e: any) {
+      console.error(e);
+      setVerificationResult("invalid");
+      addLog(`⚠ Verification failed: ${e?.message ?? e}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [viemClient, derivationProof, address, baseAddress, addLog]);
+
+  // Funzione per creare una firma di test
+  const createTestSignature = useCallback(async () => {
+    if (!baseProvider) {
+      addLog("✗ No Base provider available for test signature");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      addLog("📝 Creating test signature...");
+
+      // 1) chiedi l’account *adesso* (evita mismatch con stato stale)
+      const accounts = await baseProvider.request({
+        method: "eth_requestAccounts",
+        params: [],
+      }) as string[];
+
+      const from = (accounts?.[0] ?? baseAddress) as `0x${string}`;
+      if (!from) {
+        addLog("✗ No account available for test signature");
+        return;
+      }
+
+      // 2) firma come in App(test2) (usa il tuo helper invece di Buffer)
+      const sig = await baseProvider.request({
+        method: "personal_sign",
+        params: [ `0x${Buffer.from(testMessage, "utf8").toString("hex")}`, from],
+      }) as `0x${string}`;
+
+      setTestSignerAddr(from);
+      setTestSignature(sig);
+      addLog(`✓ Test signature created from ${from.slice(0, 8)}...: ${sig.slice(0, 20)}...`);
+    } catch (error: any) {
+      addLog(`✗ Failed to create test signature: ${error?.message || error}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [baseProvider, baseAddress, testMessage, addLog]);
+
+
+  const verifyTestSignature = useCallback(async () => {
+    if (!viemClient || !testSignature) {
+      addLog("⚠ Missing viem client or test signature for verification");
+      return;
+    }
+    const addr = (testSignerAddr ?? baseAddress) as `0x${string}` | null;
+    if (!addr) {
+      addLog("⚠ No address available for test verification");
+      return;
+    }
+    console.log("!!!!Debug🔑 [verifyTestSignature] addr:", addr);
+
+    setLoading(true);
+    try {
+      addLog("🔍 Verifying test signature...");
+
+      console.log("debug client:", viemClient);
+
+      const ok = await viemClient.verifyMessage({
+        address: addr,
+        message: testMessage,
+        signature: testSignature as `0x${string}`,
+      });
+
+      setTestVerificationResult(ok ? "valid" : "invalid");
+      addLog(`✅ Test signature verification: ${ok ? "VALID" : "INVALID"}`);
+    } catch (e: any) {
+      console.error(e);
+      setTestVerificationResult("invalid");
+      addLog(`⚠ Test verification failed: ${e?.message ?? e}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [viemClient, testSignature, testMessage, testSignerAddr, address, baseAddress, addLog]);
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -536,8 +658,8 @@ export default function App() {
 
             <CelebrationToast show={showToast} onClose={() => setShowToast(false)} />
 
-            {/* Identity Proof Verification Section
-            {ready && (isConnected || isBaseConnected) && !needsIdentityCreation && identityProof && (
+            {/* Identity Proof Verification Section */}
+            {ready && (isConnected || isBaseConnected) && !needsIdentityCreation && derivationProof && (
               <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-6">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-lg font-semibold">Identity Proof Verification</h3>
@@ -559,10 +681,10 @@ export default function App() {
                       </span>
                     )}
                   </div>
-                </div> */}
+                </div>
 
-            {/* Display stored proof data */}
-            {/* <div className="space-y-3 text-sm">
+                {/* Display stored proof data */}
+                <div className="space-y-3 text-sm">
                   <div className="bg-gray-800 rounded p-3">
                     <p className="text-gray-400 mb-1">Connected Address:</p>
                     <p className="font-mono text-blue-400 break-all">
@@ -572,18 +694,70 @@ export default function App() {
 
                   <div className="bg-gray-800 rounded p-3">
                     <p className="text-gray-400 mb-1">Stored Proof Message:</p>
-                    <p className="font-mono text-green-400 break-all">{identityProof.message}</p>
+                    <p className="font-mono text-green-400 break-all">{derivationProof.message}</p>
                   </div>
 
                   <div className="bg-gray-800 rounded p-3">
                     <p className="text-gray-400 mb-1">Stored Proof Signature:</p>
                     <p className="font-mono text-yellow-400 break-all text-xs">
-                      {identityProof.signature}
+                      {derivationProof.signature}
                     </p>
                   </div>
                 </div>
               </div>
-            )} */}
+            )}
+
+
+            {/* Test Signature Section */}
+            {ready && (isConnected || isBaseConnected) && !needsIdentityCreation && (
+              <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 mb-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold">Test Signature</h3>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={createTestSignature}
+                      disabled={loading}
+                      className="px-3 py-2 text-sm bg-blue-700 hover:bg-blue-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded"
+                    >
+                      {loading ? "Creating..." : "Create Test Signature"}
+                    </button>
+
+                    <button
+                      onClick={verifyTestSignature}
+                      disabled={loading || !testSignature}
+                      className="px-3 py-2 text-sm bg-green-700 hover:bg-green-600 disabled:bg-gray-800 disabled:cursor-not-allowed rounded"
+                    >
+                      {loading ? "Verifying..." : "Verify Test Signature"}
+                    </button>
+
+                    {testVerificationResult && (
+                      <span className={`text-sm px-3 py-1 rounded ${testVerificationResult === "valid"
+                        ? "bg-green-800 text-green-200"
+                        : "bg-red-800 text-red-200"
+                        }`}>
+                        {testVerificationResult.toUpperCase()}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-3 text-sm">
+                  <div className="bg-gray-800 rounded p-3">
+                    <p className="text-gray-400 mb-1">Test Message:</p>
+                    <p className="font-mono text-green-400 break-all">{testMessage}</p>
+                  </div>
+
+                  {testSignature && (
+                    <div className="bg-gray-800 rounded p-3">
+                      <p className="text-gray-400 mb-1">Test Signature:</p>
+                      <p className="font-mono text-yellow-400 break-all text-xs">
+                        {testSignature}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {needsIdentityCreation ? (
               <IdentityCreation
@@ -711,51 +885,7 @@ export default function App() {
                                   : 'bg-gray-700 mx-auto text-center text-xs'
                                 }`}
                             >
-                              <p className="text-sm flex items-center gap-1 overflow-visible">
-                                {msg.type === "system" && (
-                                  msg.verified ? (
-                                    <span className="relative group inline-flex items-center">
-                                      <Fingerprint size={14} className="text-green-400 shrink-0" />
-                                      <span
-                                        role="tooltip"
-                                        className="pointer-events-none absolute -top-2 left-20 -translate-x-1/2
-                     px-2 py-1 text-xs rounded bg-gray-900 text-blue-100
-                     border border-gray-700 opacity-0 group-hover:opacity-100
-                     transition-opacity whitespace-nowrap z-50"
-                                      >
-                                        Identity proof verified
-                                      </span>
-                                    </span>
-                                  ) : (
-                                    msg.direction === "incoming" && (
-                                      <span className="relative group inline-flex items-center">
-                                        <X size={14} className="text-red-500 shrink-0" />
-                                        <span
-                                          role="tooltip"
-                                          className="pointer-events-none absolute -top-7 left-20 -translate-x-1/2
-                       px-2 py-1 text-xs rounded bg-gray-900 text-red-100
-                       border border-gray-700 opacity-0 group-hover:opacity-100
-                       transition-opacity whitespace-nowrap z-50"
-                                        >
-                                          Identity proof not verified
-                                        </span>
-                                      </span>
-                                    )
-                                  )
-                                )}
-
-                                {msg.type === "system" && msg.decrypted ? (
-                                  <>
-                                    <span className="font-bold">{msg.decrypted.split(":")[0]}:</span>
-                                    {msg.decrypted.split(":").slice(1).join(":")}
-                                  </>
-                                ) : (
-                                  msg.decrypted || msg.ciphertext
-                                )}
-                              </p>
-
-
-
+                              <p className="text-sm">{msg.decrypted || msg.ciphertext}</p>
                               <div className="flex justify-between items-center mt-1">
                                 <span className="text-xs text-gray-300">
                                   {new Date(msg.timestamp).toLocaleTimeString()}

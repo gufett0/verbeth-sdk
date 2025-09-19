@@ -10,7 +10,7 @@ import {
   HandshakeResponseContent,
   extractKeysFromHandshakeResponse
 } from './payload.js';
-import { DerivationProof } from './types.js'; 
+import { IdentityProof } from './types.js'; 
 
 /**
  * Encrypts a structured payload (JSON-serializable objects)
@@ -23,7 +23,7 @@ export function encryptStructuredPayload<T>(
   staticSigningSecretKey?: Uint8Array,
   staticSigningPublicKey?: Uint8Array
 ): string {
-  // Encode payload as binary JSON
+  // encode payload as binary JSON
   const plaintext = encodeStructuredContent(payload);
   
   const nonce = nacl.randomBytes(nacl.box.nonceLength);
@@ -61,7 +61,7 @@ export function decryptStructuredPayload<T>(
   return decodeStructuredContent(box, converter);
 }
 
-// Convenience wrappers for encrypting and decrypting messages
+//  wrappers for encrypting and decrypting messages
 export function encryptMessage(
   message: string,
   recipientPublicKey: Uint8Array,
@@ -106,14 +106,14 @@ export function decryptHandshakeResponse(
     payloadJson,
     initiatorEphemeralSecretKey,
     (obj) => {
-      if (!obj.derivationProof) {
-        throw new Error("Invalid handshake response: missing derivationProof");
+      if (!obj.identityProof) {
+        throw new Error("Invalid handshake response: missing identityProof");
       }
       return {
         unifiedPubKeys: Uint8Array.from(Buffer.from(obj.unifiedPubKeys, 'base64')),
         ephemeralPubKey: Uint8Array.from(Buffer.from(obj.ephemeralPubKey, 'base64')),
         note: obj.note,
-        derivationProof: obj.derivationProof
+        identityProof: obj.identityProof
       };
     }
   );
@@ -130,7 +130,7 @@ export function decryptAndExtractHandshakeKeys(
   signingPubKey: Uint8Array;
   ephemeralPubKey: Uint8Array;
   note?: string;
-  derivationProof: DerivationProof; 
+  identityProof: IdentityProof; 
 } | null {
   const decrypted = decryptHandshakeResponse(payloadJson, initiatorEphemeralSecretKey);
   if (!decrypted) return null;
@@ -143,6 +143,6 @@ export function decryptAndExtractHandshakeKeys(
     signingPubKey: extracted.signingPubKey,
     ephemeralPubKey: extracted.ephemeralPubKey,
     note: decrypted.note,
-    derivationProof: decrypted.derivationProof
+    identityProof: decrypted.identityProof
   };
 }

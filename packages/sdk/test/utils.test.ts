@@ -5,10 +5,7 @@ import { JsonRpcProvider } from "ethers";
 import { MessageDeduplicator, sendEncryptedMessage } from "../src/index.js";
 import { getNextNonce } from "../src/utils/nonce.js";
 import { convertPublicKeyToX25519 } from "../src/utils/x25519.js";
-import { 
-  isSmartContract, 
-  verifyEIP1271Signature 
-} from "../src/utils.js";  
+import { isSmartContract1271, parseBindingMessage } from "../src/utils.js";
 import { ExecutorFactory } from "../src/index.js";
 import type { LogChainV1 } from "@verbeth/contracts/typechain-types";
 
@@ -20,17 +17,17 @@ const fakeProvider = {
     return "0x1626ba7e" + "0".repeat(56);
   },
   async resolveName(name: string) {
-    return name; 
-  }
+    return name;
+  },
 } as unknown as JsonRpcProvider;
 
 describe("MessageDeduplicator", () => {
   it("detects duplicates and enforces maxSize", () => {
     const dedup = new MessageDeduplicator(2);
-    expect(dedup.isDuplicate("A", "T", 1n)).toBe(false); 
-    expect(dedup.isDuplicate("A", "T", 1n)).toBe(true); 
-    expect(dedup.isDuplicate("A", "T", 2n)).toBe(false); 
-    expect(dedup.isDuplicate("A", "T", 3n)).toBe(false); 
+    expect(dedup.isDuplicate("A", "T", 1n)).toBe(false);
+    expect(dedup.isDuplicate("A", "T", 1n)).toBe(true);
+    expect(dedup.isDuplicate("A", "T", 2n)).toBe(false);
+    expect(dedup.isDuplicate("A", "T", 3n)).toBe(false);
     expect(dedup.isDuplicate("A", "T", 1n)).toBe(false); // not duplicate anymore
   });
 });
@@ -46,23 +43,9 @@ describe("getNextNonce", () => {
 });
 
 describe("Utils Functions", () => {
-  it("isSmartContract returns true for contract bytecode", async () => {
-    expect(await isSmartContract("0xCc…Cc", fakeProvider)).toBe(true);
-    expect(await isSmartContract("0xEe…Ee", fakeProvider)).toBe(false);
-  });
-
-  it("verifyEIP1271Signature returns true on magic value", async () => {
-    const validHash = "0x" + "aa".repeat(32);
-    const validSig = "0x" + "bb".repeat(65);
-  
-    const ok = await verifyEIP1271Signature(
-      "0xCc…Cc",
-      validHash,
-      validSig,
-      fakeProvider
-    );
-  
-    expect(ok).toBe(true);
+  it("isSmartContract1271 returns true for contract bytecode", async () => {
+    expect(await isSmartContract1271("0xCc…Cc", fakeProvider)).toBe(true);
+    expect(await isSmartContract1271("0xEe…Ee", fakeProvider)).toBe(false);
   });
 
   it("convertPublicKeyToX25519 returns 32-byte key", () => {
@@ -71,8 +54,6 @@ describe("Utils Functions", () => {
     expect(out).toHaveLength(32);
   });
 });
-
-
 
 describe("sendEncryptedMessage", () => {
   it("calls contract.sendMessage with expected parameters", async () => {
@@ -96,12 +77,12 @@ describe("sendEncryptedMessage", () => {
     });
 
     expect(mockSendMessage).toHaveBeenCalledTimes(1);
-    
+
     const callArgs = mockSendMessage.mock.calls[0];
     expect(callArgs).toHaveLength(4); // ciphertext, topic, timestamp, nonce
-    expect(typeof callArgs[1]).toBe('string'); 
-    expect(typeof callArgs[2]).toBe('number'); 
-    expect(typeof callArgs[3]).toBe('bigint'); 
+    expect(typeof callArgs[1]).toBe("string");
+    expect(typeof callArgs[2]).toBe("number");
+    expect(typeof callArgs[3]).toBe("bigint");
   });
 
   it("generates different nonces for different calls", async () => {
@@ -136,7 +117,7 @@ describe("sendEncryptedMessage", () => {
     });
 
     expect(mockSendMessage).toHaveBeenCalledTimes(2);
-    
+
     const firstNonce = mockSendMessage.mock.calls[0][3];
     const secondNonce = mockSendMessage.mock.calls[1][3];
     expect(secondNonce).toBe(firstNonce + 1n);
@@ -145,9 +126,63 @@ describe("sendEncryptedMessage", () => {
 
 describe("Unified Keys Utilities", () => {
   it("should handle unified key operations", () => {
-    // just verify the basic imports work
-    expect(typeof isSmartContract).toBe('function');
-    expect(typeof verifyEIP1271Signature).toBe('function');
-    expect(typeof sendEncryptedMessage).toBe('function');
+    expect(typeof isSmartContract1271).toBe("function");
+    expect(typeof sendEncryptedMessage).toBe("function");
+  });
+});
+
+describe("parseBindingMessage", () => {
+  it("parses a well-formed binding message", () => {
+    const msg = [
+      "VerbEth Key Binding v1",
+      "Address: 0x1234567890abcdef1234567890abcdef12345678",
+      "PkEd25519: 0x" + "11".repeat(32),
+      "PkX25519: 0x" + "22".repeat(32),
+      "Context: verbeth",
+      "Version: 1",
+      "ChainId: 8453",
+      "RpId: example.com",
+    ].join("\n");
+
+    const parsed = parseBindingMessage(msg);
+
+    expect(parsed.header).toBe("VerbEth Key Binding v1");
+    expect(parsed.address?.toLowerCase()).toBe("0x1234567890abcdef1234567890abcdef12345678");
+    expect(parsed.pkEd25519).toBe("0x" + "11".repeat(32));
+    expect(parsed.pkX25519).toBe("0x" + "22".repeat(32));
+    expect(parsed.context).toBe("verbeth");
+    expect(parsed.version).toBe("1");
+    expect(parsed.chainId).toBe(8453);
+    expect(parsed.rpId).toBe("example.com");
+  });
+
+  it("handles missing optional fields", () => {
+    const msg = [
+      "VerbEth Key Binding v1",
+      "Address: 0xabcdefabcdefabcdefabcdefabcdefabcdefabcd",
+    ].join("\n");
+
+    const parsed = parseBindingMessage(msg);
+
+    expect(parsed.header).toBe("VerbEth Key Binding v1");
+    expect(parsed.address?.toLowerCase()).toBe("0xabcdefabcdefabcdefabcdefabcdefabcdefabcd");
+
+    expect(parsed.pkEd25519).toBeUndefined();
+    expect(parsed.pkX25519).toBeUndefined();
+    expect(parsed.context).toBeUndefined();
+    expect(parsed.version).toBeUndefined();
+    expect(parsed.chainId).toBeUndefined();
+    expect(parsed.rpId).toBeUndefined();
+  });
+
+  it("ignores lines without ':'", () => {
+    const msg = [
+      "VerbEth Key Binding v1",
+      "This line has no colon",
+      "Address: 0x1234567890abcdef1234567890abcdef12345678",
+    ].join("\n");
+
+    const parsed = parseBindingMessage(msg);
+    expect(parsed.address?.toLowerCase()).toBe("0x1234567890abcdef1234567890abcdef12345678");
   });
 });

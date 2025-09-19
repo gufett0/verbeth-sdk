@@ -1,4 +1,4 @@
-import type { IdentityKeyPair, DerivationProof } from '@verbeth/sdk';
+import type { IdentityKeyPair, IdentityProof } from '@verbeth/sdk';
 import { keccak256, toUtf8Bytes } from 'ethers';
 
 /* ------------------------------- CONSTANTS -------------------------------- */
@@ -27,10 +27,10 @@ export const EVENT_SIGNATURES = {
 /* ------------------------------- ENTITIES -------------------------------- */
 export interface Contact {
   address: string;
-  ownerAddress: string; // which account own this contact
-  identityPubKey?: Uint8Array; // X25519 for encryption
-  signingPubKey?: Uint8Array; // Ed25519 for signing
-  ephemeralKey?: Uint8Array; // Temporary key for handshake
+  ownerAddress: string; 
+  identityPubKey?: Uint8Array; 
+  signingPubKey?: Uint8Array; 
+  ephemeralKey?: Uint8Array; 
   topic?: string;
   status: 'none' | 'handshake_sent' | 'established';
   lastMessage?: string;
@@ -55,11 +55,12 @@ export interface Message {
   dedupKey: string; // `${sender}:${topic}:${nonce}`
   type: 'text' | 'system';
   status: 'pending' | 'confirmed' | 'failed';
+  verified?: boolean;
 }
 
 export interface PendingHandshake {
-  id: string; // Transaction hash
-  ownerAddress: string; // which account own this contact
+  id: string;
+  ownerAddress: string; 
   sender: string;
   identityPubKey: Uint8Array;
   signingPubKey: Uint8Array;
@@ -71,10 +72,10 @@ export interface PendingHandshake {
 }
 
 export interface StoredIdentity {
-  address: string; // Ethereum address (primary key)
+  address: string; // primary key
   keyPair: IdentityKeyPair; // X25519 + Ed25519 keys
-  derivedAt: number; // Timestamp of derivation
-  proof: DerivationProof; // Signature proof of ownership
+  derivedAt: number; 
+  proof: IdentityProof; 
 }
 
 export interface AppSettings {

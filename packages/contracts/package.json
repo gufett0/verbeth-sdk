@@ -29,7 +29,6 @@
     "deploy:local": "hardhat ignition deploy ignition/modules/LogChain.ts --network localhost --strategy create2",
     "deploy:testnet": "hardhat ignition deploy ignition/modules/LogChain.ts --network baseSepolia --strategy create2",
     "deploy:mainnet": "hardhat ignition deploy ignition/modules/LogChain.ts --network base --strategy create2",
-    "deploy:testnet:validator": "hardhat ignition deploy ignition/modules/UniversalSigValidator.ts --network baseSepolia --strategy create2",
     "deploy:mainnet:validator": "hardhat ignition deploy ignition/modules/UniversalSigValidator.ts --network base --strategy create2"
   },
   "exports": {

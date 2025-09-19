@@ -13,13 +13,13 @@ export interface HandshakeLog {
   sender: string;
   pubKeys: string; // Unified field (hex string of 65 bytes: version + X25519 + Ed25519)
   ephemeralPubKey: string;
-  plaintextPayload: string; // always contains JSON with derivationProof
+  plaintextPayload: string; // always contains JSON with identityProof
 }
 
 export interface HandshakeResponseLog {
   inResponseTo: string;
   responder: string;
-  ciphertext: string; // Contains unified pubKeys + derivationProof encrypted
+  ciphertext: string; // Contains unified pubKeys + identityProof encrypted
 }
 
 // Identity key pair structure (from identity.ts)
@@ -32,10 +32,11 @@ export interface IdentityKeyPair {
   signingSecretKey: Uint8Array;
 }
 
-// Derivation proof structure
-export interface DerivationProof {
-  message: string; // "VerbEth Identity Key Derivation v1\nAddress: ..."
-  signature: string; // Ethereum signature of the message
+// Identity proof structure
+export interface IdentityProof {
+  message: string; 
+  signature: string;
+  messageRawHex?: `0x${string}`;
 }
 
 export type PackedUserOperation =

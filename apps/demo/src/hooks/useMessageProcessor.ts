@@ -1,7 +1,7 @@
 // apps/demo/src/hooks/useMessageProcessor.ts
 
 import { useState, useEffect, useCallback } from "react";
-import { keccak256, toUtf8Bytes, AbiCoder } from "ethers";
+import { AbiCoder } from "ethers";
 import {
   decryptMessage,
   decryptHandshakeResponse,
@@ -134,22 +134,22 @@ export const useMessageProcessor = ({
         const recipientHash = log.topics[1];
 
         let handshakeContent;
-        let hasValidDerivationProof = false;
+        let hasValidIdentityProof = false;
 
         try {
           handshakeContent = parseHandshakePayload(plaintextPayload);
-          hasValidDerivationProof = true;
+          hasValidIdentityProof = true;
         } catch (error) {
           handshakeContent = {
             plaintextPayload: plaintextPayload,
-            derivationProof: null,
+            identityProof: null,
           };
-          hasValidDerivationProof = false;
+          hasValidIdentityProof = false;
         }
 
-        // Verify identity if we have a valid derivation proof
+        // Verify identity if we have a valid identity proof
         let isVerified = false;
-        if (hasValidDerivationProof) {
+        if (hasValidIdentityProof) {
           try {
             const handshakeEvent = {
               recipientHash,
@@ -210,6 +210,7 @@ export const useMessageProcessor = ({
           type: "system" as const,
           ownerAddress: address,
           status: "confirmed" as const,
+          verified: isVerified,
         };
 
         await dbService.saveMessage(handshakeMessage);
@@ -354,6 +355,7 @@ export const useMessageProcessor = ({
           type: "system" as const,
           ownerAddress: address,
           status: "confirmed" as const,
+          verified: isVerified,
         };
 
         await dbService.saveMessage(responseMessage);

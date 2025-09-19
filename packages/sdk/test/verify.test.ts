@@ -5,18 +5,11 @@ import {
   keccak256,
   toUtf8Bytes,
   hexlify,
-  JsonRpcProvider,
 } from "ethers";
 import nacl from "tweetnacl";
-import { sha256 } from "@noble/hashes/sha256";
-import { hkdf } from "@noble/hashes/hkdf";
 
 import {
-  verifyEOADerivationProof,
-  verifySmartAccountDerivationProof,
-  verifyEIP1271Signature,
-} from "../src/utils.js";
-import {
+  verifyIdentityProof,
   verifyHandshakeIdentity,
   verifyHandshakeResponseIdentity,
 } from "../src/verify.js";
@@ -27,55 +20,64 @@ import {
   parseHandshakeKeys,
 } from "../src/payload.js";
 import {
-  DerivationProof,
+  IdentityProof,
   HandshakeLog,
   HandshakeResponseLog,
 } from "../src/types.js";
 import { deriveIdentityWithUnifiedKeys } from "../src/identity.js";
 
-const mockProvider = {
-  async getCode(address: string) {
-    // assume all addresses starting with '0xCc' are contracts
-    return address.startsWith("0xCc") ? "0x60016000" : "0x";
+const mockProvider: any = {
+  async request({ method, params }: { method: string; params?: any[] }) {
+    if (method === "eth_getCode") {
+      const address = params?.[0];
+      return address && address.startsWith("0xCc") ? "0x60016000" : "0x";
+    }
+    if (method === "eth_call") {
+      return "0x1";
+    }
+    if (method === "eth_chainId") {
+      return "0x1";
+    }
+    throw new Error("Unsupported method: " + method);
   },
-  async call() {
-    return "0x1626ba7e" + "0".repeat(56);
-  },
-} as unknown as JsonRpcProvider;
+};
 
-describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
-  describe("EOA Derivation Proof Verification", () => {
-    it("verifyEOADerivationProof - OK with correct unified keys", async () => {
+describe("Verify Identity & Handshake (Unified)", () => {
+  describe("Identity Proof Verification", () => {
+    it("OK with correct unified keys", async () => {
       const wallet: HDNodeWallet = Wallet.createRandom();
-      const { derivationProof, identityPubKey, signingPubKey } =
+      const { identityProof, identityPubKey, signingPubKey } =
         await deriveIdentityWithUnifiedKeys(wallet, wallet.address);
 
-      const result = verifyEOADerivationProof(derivationProof, wallet.address, {
-        identityPubKey,
-        signingPubKey,
-      });
+      const result = await verifyIdentityProof(
+        identityProof,
+        wallet.address,
+        { identityPubKey, signingPubKey },
+        mockProvider
+      );
 
       expect(result).toBe(true);
     });
 
-    it("verifyEOADerivationProof - KO with wrong address", async () => {
+    it("KO with wrong address", async () => {
       const wallet1: HDNodeWallet = Wallet.createRandom();
       const wallet2: HDNodeWallet = Wallet.createRandom();
-      const { derivationProof, identityPubKey, signingPubKey } =
+      const { identityProof, identityPubKey, signingPubKey } =
         await deriveIdentityWithUnifiedKeys(wallet1, wallet1.address);
 
-      const result = verifyEOADerivationProof(
-        derivationProof,
+      const result = await verifyIdentityProof(
+        identityProof,
         wallet2.address,
-        { identityPubKey, signingPubKey }
+        { identityPubKey, signingPubKey },
+        mockProvider
       );
 
       expect(result).toBe(false);
     });
 
-    it("verifyEOADerivationProof - KO with wrong keys", async () => {
+    it("KO with wrong keys", async () => {
       const wallet: HDNodeWallet = Wallet.createRandom();
-      const { derivationProof } = await deriveIdentityWithUnifiedKeys(
+      const { identityProof } = await deriveIdentityWithUnifiedKeys(
         wallet,
         wallet.address
       );
@@ -85,104 +87,21 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
         signingPubKey: new Uint8Array(32).fill(0xbb),
       };
 
-      const result = verifyEOADerivationProof(
-        derivationProof,
+      const result = await verifyIdentityProof(
+        identityProof,
         wallet.address,
-        wrongKeys
-      );
-
-      expect(result).toBe(false);
-    });
-  });
-
-  describe("Smart Contract Verification", () => {
-    it("verifyEIP1271Signature - handles both success and failure cases", async () => {
-      const contractAddress = "0xCcCcCc1234567890123456789012345678901234";
-      const messageHash = "0x" + "aa".repeat(32);
-      const signature = "0x" + "bb".repeat(65);
-
-      const failingProvider = {
-        async getCode() {
-          return "0x60016000";
-        },
-        async call() {
-          throw new Error("Contract call failed");
-        },
-      } as unknown as JsonRpcProvider;
-
-      const result = await verifyEIP1271Signature(
-        contractAddress,
-        messageHash,
-        signature,
-        failingProvider
-      );
-
-      const result2 = await verifyEIP1271Signature(
-        contractAddress,
-        messageHash,
-        signature,
+        wrongKeys,
         mockProvider
       );
 
       expect(result).toBe(false);
-      expect(result2).toBe(true);
-    });
-
-    it("verifySmartAccountDerivationProof - handles EIP-1271 correctly", async () => {
-      const contractAddress = "0xCcCcCc1234567890123456789012345678901234";
-      const tempWallet = Wallet.createRandom();
-
-      const message = `VerbEth Identity Key Derivation v1\nAddress: ${contractAddress}`;
-      const signature = await tempWallet.signMessage(message);
-
-      const derivationProof: DerivationProof = {
-        message,
-        signature,
-      };
-
-      const ikm = sha256(signature);
-      const salt = new Uint8Array(32);
-
-      // Derive X25519 keys
-      const info_x25519 = new TextEncoder().encode("verbeth-x25519-v1");
-      const keyMaterial_x25519 = hkdf(sha256, ikm, salt, info_x25519, 32);
-      const boxKeyPair = nacl.box.keyPair.fromSecretKey(keyMaterial_x25519);
-
-      // Derive Ed25519 keys
-      const info_ed25519 = new TextEncoder().encode("verbeth-ed25519-v1");
-      const keyMaterial_ed25519 = hkdf(sha256, ikm, salt, info_ed25519, 32);
-      const signKeyPair = nacl.sign.keyPair.fromSeed(keyMaterial_ed25519);
-
-      const expectedKeys = {
-        identityPubKey: boxKeyPair.publicKey,
-        signingPubKey: signKeyPair.publicKey,
-      };
-
-      const enhancedMockProvider = {
-        async getCode(address: string) {
-          return address.startsWith("0xCc") ? "0x60016000" : "0x";
-        },
-        async call(request: any) {
-          // EIP-1271 mock: a simulation of a contract that always returns a valid signature
-          return "0x1626ba7e" + "0".repeat(56);
-        },
-      } as unknown as JsonRpcProvider;
-
-      const result = await verifySmartAccountDerivationProof(
-        derivationProof,
-        contractAddress,
-        expectedKeys,
-        enhancedMockProvider
-      );
-
-      expect(result).toBe(true);
     });
   });
 
   describe("Handshake Verification", () => {
-    it("verifyHandshakeIdentity - EOA flow with unified keys", async () => {
+    it("EOA flow with unified keys", async () => {
       const wallet: HDNodeWallet = Wallet.createRandom();
-      const { derivationProof, unifiedPubKeys } =
+      const { identityProof, unifiedPubKeys } =
         await deriveIdentityWithUnifiedKeys(wallet, wallet.address);
 
       const handshakeEvent: HandshakeLog = {
@@ -192,7 +111,7 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
         ephemeralPubKey: hexlify(nacl.box.keyPair().publicKey),
         plaintextPayload: JSON.stringify({
           plaintextPayload: "Hi VerbEth",
-          derivationProof,
+          identityProof,
         }),
       };
 
@@ -203,21 +122,20 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
       expect(result).toBe(true);
     });
 
-    it("verifyHandshakeIdentity - fails with invalid derivation proof", async () => {
+    it("fails with invalid identity proof", async () => {
       const wallet: HDNodeWallet = Wallet.createRandom();
       const { unifiedPubKeys } = await deriveIdentityWithUnifiedKeys(
         wallet,
         wallet.address
       );
 
-      // create invalid derivation proof with different wallet signature
       const differentWallet: HDNodeWallet = Wallet.createRandom();
       const invalidMessage = "Invalid message for verification";
       const invalidSignature = await differentWallet.signMessage(
         invalidMessage
       );
 
-      const invalidDerivationProof: DerivationProof = {
+      const invalidIdentityProof: IdentityProof = {
         message: invalidMessage,
         signature: invalidSignature,
       };
@@ -229,7 +147,7 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
         ephemeralPubKey: hexlify(nacl.box.keyPair().publicKey),
         plaintextPayload: JSON.stringify({
           plaintextPayload: "Hi VerbEth",
-          derivationProof: invalidDerivationProof,
+          identityProof: invalidIdentityProof,
         }),
       };
 
@@ -242,22 +160,22 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
   });
 
   describe("Handshake Response Verification", () => {
-    it("verifyHandshakeResponseIdentity - EOA flow with unified keys", async () => {
+    it("EOA flow with unified keys", async () => {
       const responderWallet: HDNodeWallet = Wallet.createRandom();
-      const { derivationProof, identityPubKey, unifiedPubKeys } =
+      const { identityProof, identityPubKey, unifiedPubKeys } =
         await deriveIdentityWithUnifiedKeys(
           responderWallet,
           responderWallet.address
         );
 
-      const aliceEphemeral = nacl.box.keyPair(); // initiator
+      const aliceEphemeral = nacl.box.keyPair();
       const responderEphemeral = nacl.box.keyPair();
 
       const responseContent: HandshakeResponseContent = {
         unifiedPubKeys,
         ephemeralPubKey: responderEphemeral.publicKey,
         note: "pong",
-        derivationProof,
+        identityProof,
       };
 
       const payload = encryptStructuredPayload(
@@ -283,9 +201,9 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
       expect(result).toBe(true);
     });
 
-    it("verifyHandshakeResponseIdentity - fails with wrong identity key", async () => {
+    it("fails with wrong identity key", async () => {
       const responderWallet: HDNodeWallet = Wallet.createRandom();
-      const { derivationProof, unifiedPubKeys } =
+      const { identityProof, unifiedPubKeys } =
         await deriveIdentityWithUnifiedKeys(
           responderWallet,
           responderWallet.address
@@ -298,7 +216,7 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
         unifiedPubKeys,
         ephemeralPubKey: responderEphemeral.publicKey,
         note: "pong",
-        derivationProof,
+        identityProof,
       };
 
       const payload = encryptStructuredPayload(
@@ -336,10 +254,7 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
         signingPubKey
       );
 
-      const event = {
-        pubKeys: hexlify(unifiedPubKeys),
-      };
-
+      const event = { pubKeys: hexlify(unifiedPubKeys) };
       const parsed = parseHandshakeKeys(event);
 
       expect(parsed).not.toBeNull();
@@ -348,10 +263,7 @@ describe("Verify Identity & Handshake (Updated for Unified Keys)", () => {
     });
 
     it("parseHandshakeKeys returns null for invalid keys", () => {
-      const event = {
-        pubKeys: "0x1234",
-      };
-
+      const event = { pubKeys: "0x1234" };
       const parsed = parseHandshakeKeys(event);
       expect(parsed).toBeNull();
     });

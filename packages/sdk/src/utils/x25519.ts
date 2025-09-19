@@ -1,4 +1,4 @@
-import { sha256 } from '@noble/hashes/sha256';
+import { sha256 } from '@noble/hashes/sha2';
 
 /**
  * Converts a 64-byte raw secp256k1 public key into a 32-byte x25519-compatible public key.
@@ -10,5 +10,5 @@ export function convertPublicKeyToX25519(secpPubKey: Uint8Array): Uint8Array {
   }
 
   const hash = sha256(secpPubKey);
-  return Uint8Array.from(hash.slice(0, 32)); // NaCl-compatible
+  return Uint8Array.from(hash.slice(0, 32));
 }

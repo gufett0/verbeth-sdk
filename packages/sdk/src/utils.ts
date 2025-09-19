@@ -1,48 +1,112 @@
 // packages/sdk/src/utils.ts
 
-import { 
+import {
   Contract,
   JsonRpcProvider,
-  verifyMessage,
-  hashMessage  
+  getAddress,
+  hexlify,
 } from "ethers";
-import { sha256 } from '@noble/hashes/sha256';
-import { hkdf } from '@noble/hashes/hkdf';
-import nacl from 'tweetnacl';
-import { DerivationProof } from './types.js';
 import { keccak256, toUtf8Bytes } from "ethers";
 import { AbiCoder } from "ethers";
+import {
+  createPublicClient,
+  custom,
+  defineChain,
+  type PublicClient,
+} from "viem";
 
-/**
- * Generalized EIP-1271 signature verification
- * Checks if a smart contract validates a signature according to EIP-1271
- */
-export async function verifyEIP1271Signature(
-  contractAddress: string,
-  messageHash: string,
-  signature: string,
-  provider: JsonRpcProvider
-): Promise<boolean> {
-  try {
-    const accountContract = new Contract(
-      contractAddress,
-      ["function isValidSignature(bytes32, bytes) external view returns (bytes4)"],
-      provider
-    );
 
-    const result = await accountContract.isValidSignature(messageHash, signature);
-    return result === "0x1626ba7e"; 
-  } catch (err) {
-    console.error("EIP-1271 verification error:", err);
-    return false;
+export function parseBindingMessage(message: string): {
+  header?: string;
+  address?: string;
+  pkEd25519?: `0x${string}`;
+  pkX25519?: `0x${string}`;
+  context?: string;
+  version?: string;
+  chainId?: number;
+  rpId?: string;
+} {
+  const lines = message.split("\n").map((l) => l.trim());
+  const out: any = {};
+  if (lines[0]) out.header = lines[0];
+
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i];
+    const idx = line.indexOf(":");
+    if (idx === -1) continue;
+    const key = line.slice(0, idx).trim().toLowerCase();
+    const val = line.slice(idx + 1).trim();
+
+    if (key === "address") out.address = getAddress(val);
+    if (key === "pked25519") {
+      out.pkEd25519 = hexlify(val) as `0x${string}`;
+    }
+    if (key === "pkx25519") {
+      out.pkX25519 = hexlify(val) as `0x${string}`;
+    }
+    if (key === "context") out.context = val;
+    if (key === "version") out.version = val;
+    if (key === "chainid") out.chainId = Number(val);
+    if (key === "rpid") out.rpId = val;
   }
+  return out;
+}
+
+export type Rpcish =
+  | import("ethers").JsonRpcProvider
+  | import("ethers").BrowserProvider 
+  | { request: (args: { method: string; params?: any[] }) => Promise<any> }; // generic EIP-1193
+
+function toEip1193(provider: Rpcish) {
+  if ((provider as any).request)
+    return provider as { request: ({ method, params }: any) => Promise<any> };
+
+  if ((provider as any).send) {
+    return {
+      request: ({ method, params }: { method: string; params?: any[] }) =>
+        (provider as any).send(method, params ?? []),
+    };
+  }
+  throw new Error("Unsupported provider: cannot build EIP-1193 request");
+}
+
+export async function makeViemPublicClient(
+  provider: Rpcish
+): Promise<PublicClient> {
+  const eip1193 = toEip1193(provider);
+
+  let chainId = 1;
+  try {
+    const hex = await eip1193.request({ method: "eth_chainId" });
+    chainId = Number(hex);
+  } catch {
+
+  }
+
+  const chain = defineChain({
+    id: chainId,
+    name: `chain-${chainId}`,
+    nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    rpcUrls: { default: { http: [] } },
+  });
+
+  return createPublicClient({ chain, transport: custom(eip1193) });
+}
+
+export const ERC6492_SUFFIX =
+  "0x6492649264926492649264926492649264926492649264926492649264926492";
+
+export function hasERC6492Suffix(sigHex: string): boolean {
+  if (!sigHex || typeof sigHex !== "string") return false;
+  const s = sigHex.toLowerCase();
+  return s.endsWith(ERC6492_SUFFIX.slice(2).toLowerCase());
 }
 
 /**
  * Checks if an address is a smart contract that supports EIP-1271 signature verification
  * Returns true if the address has deployed code AND implements isValidSignature function
  */
-export async function isSmartContract(
+export async function isSmartContract1271(
   address: string,
   provider: JsonRpcProvider
 ): Promise<boolean> {
@@ -54,7 +118,9 @@ export async function isSmartContract(
 
     const contract = new Contract(
       address,
-      ["function isValidSignature(bytes32, bytes) external view returns (bytes4)"],
+      [
+        "function isValidSignature(bytes32, bytes) external view returns (bytes4)",
+      ],
       provider
     );
 
@@ -84,13 +150,18 @@ export async function isSmartContract(
         );
         const hash = keccak256(toUtf8Bytes("test message"));
 
-        const result = await contract.isValidSignature.staticCall(hash, signatureWrapper);
+        const result = await contract.isValidSignature.staticCall(
+          hash,
+          signatureWrapper
+        );
         return result === "0x1626ba7e";
       } catch (webAuthnErr: any) {
         // if it's a CALL_EXCEPTION without data then function exists
         if (
-          (webAuthnErr as any).code === "CALL_EXCEPTION" && 
-          (!(webAuthnErr as any).data || (webAuthnErr as any).data === "0x" || (webAuthnErr as any).data === null)
+          (webAuthnErr as any).code === "CALL_EXCEPTION" &&
+          (!(webAuthnErr as any).data ||
+            (webAuthnErr as any).data === "0x" ||
+            (webAuthnErr as any).data === null)
         ) {
           return true;
         }
@@ -103,142 +174,3 @@ export async function isSmartContract(
   }
 }
 
-
-/**
- * Verifies derivation proof and re-derives unified keys
- * This is the core verification function for the new unified keys system
- */
-export function verifyDerivationProof(
-  derivationProof: DerivationProof,
-  expectedSenderAddress: string,
-  expectedUnifiedKeys: {
-    identityPubKey: Uint8Array;
-    signingPubKey: Uint8Array;
-  }
-): boolean {
-  try {
-    // 1. Verify the derivation signature was created by the expected address
-    const recoveredAddress = verifyMessage(
-      derivationProof.message,
-      derivationProof.signature
-    );
-    
-    if (recoveredAddress.toLowerCase() !== expectedSenderAddress.toLowerCase()) {
-      console.error("Derivation signature doesn't match expected sender");
-      console.error("  Expected:", expectedSenderAddress);
-      console.error("  Got:", recoveredAddress);
-      return false;
-    }
-    
-    // 2. Re-derive keys using the provided signature
-    const ikm = sha256(derivationProof.signature);
-    const salt = new Uint8Array(32);
-    
-    // Re-derive X25519 keys
-    const info_x25519 = new TextEncoder().encode("verbeth-x25519-v1");
-    const keyMaterial_x25519 = hkdf(sha256, ikm, salt, info_x25519, 32);
-    const boxKeyPair = nacl.box.keyPair.fromSecretKey(keyMaterial_x25519);
-    
-    // Re-derive Ed25519 keys
-    const info_ed25519 = new TextEncoder().encode("verbeth-ed25519-v1");
-    const keyMaterial_ed25519 = hkdf(sha256, ikm, salt, info_ed25519, 32);
-    const signKeyPair = nacl.sign.keyPair.fromSeed(keyMaterial_ed25519);
-    
-    // 3. Compare re-derived keys with expected keys
-    const identityMatches = Buffer.from(boxKeyPair.publicKey).equals(
-      Buffer.from(expectedUnifiedKeys.identityPubKey)
-    );
-    
-    const signingMatches = Buffer.from(signKeyPair.publicKey).equals(
-      Buffer.from(expectedUnifiedKeys.signingPubKey)
-    );
-    
-    if (!identityMatches) {
-      console.error("Re-derived X25519 identity key doesn't match expected");
-      return false;
-    }
-    
-    if (!signingMatches) {
-      console.error("Re-derived Ed25519 signing key doesn't match expected");
-      return false;
-    }
-    
-    return true;
-    
-  } catch (err) {
-    console.error("verifyDerivationProof error:", err);
-    return false;
-  }
-}
-
-/**
- * Verifies derivation proof for EOA addresses
- * Uses ethers verifyMessage which supports EOA signature verification
- */
-export function verifyEOADerivationProof(
-  derivationProof: DerivationProof, 
-  expectedSenderAddress: string,
-  expectedUnifiedKeys: {
-    identityPubKey: Uint8Array;
-    signingPubKey: Uint8Array;
-  }
-): boolean {
-  return verifyDerivationProof(derivationProof, expectedSenderAddress, expectedUnifiedKeys);
-}
-
-/**
- * Verifies derivation proof for Smart Account addresses
- * Uses EIP-1271 for smart contract signature verification
- */
-export async function verifySmartAccountDerivationProof(
-  derivationProof: DerivationProof,  
-  smartAccountAddress: string,
-  expectedUnifiedKeys: {
-    identityPubKey: Uint8Array;
-    signingPubKey: Uint8Array;
-  },
-  provider: JsonRpcProvider
-): Promise<boolean> {
-  try {
-    // 1. Verify using EIP-1271
-    const messageHash = hashMessage(derivationProof.message);
-    const isValidSignature = await verifyEIP1271Signature(
-      smartAccountAddress,
-      messageHash,
-      derivationProof.signature,
-      provider
-    );
-    
-    if (!isValidSignature) {
-      console.error("Smart account signature verification failed");
-      return false;
-    }
-    
-    // 2. Re-derive keys (same process as EOA)
-    const ikm = sha256(derivationProof.signature);
-    const salt = new Uint8Array(32);
-    
-    const info_x25519 = new TextEncoder().encode("verbeth-x25519-v1");
-    const keyMaterial_x25519 = hkdf(sha256, ikm, salt, info_x25519, 32);
-    const boxKeyPair = nacl.box.keyPair.fromSecretKey(keyMaterial_x25519);
-    
-    const info_ed25519 = new TextEncoder().encode("verbeth-ed25519-v1");
-    const keyMaterial_ed25519 = hkdf(sha256, ikm, salt, info_ed25519, 32);
-    const signKeyPair = nacl.sign.keyPair.fromSeed(keyMaterial_ed25519);
-    
-    // 3. Compare keys
-    const identityMatches = Buffer.from(boxKeyPair.publicKey).equals(
-      Buffer.from(expectedUnifiedKeys.identityPubKey)
-    );
-    
-    const signingMatches = Buffer.from(signKeyPair.publicKey).equals(
-      Buffer.from(expectedUnifiedKeys.signingPubKey)
-    );
-    
-    return identityMatches && signingMatches;
-    
-  } catch (err) {
-    console.error("verifySmartAccountDerivationProof error:", err);
-    return false;
-  }
-}

@@ -29,12 +29,7 @@ export {
 } from './crypto.js';
 
 export {
-  verifyDerivationProof,
-  verifyEOADerivationProof,
-  verifySmartAccountDerivationProof
-} from './utils.js';
-
-export {
+  verifyIdentityProof,
   verifyAndExtractHandshakeKeys,
   verifyAndExtractHandshakeResponseKeys
 } from './verify.js';

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { CopyIcon } from "lucide-react";
+import { CopyIcon, Fingerprint, X } from "lucide-react";
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useWalletClient } from 'wagmi';
 import { useRpcClients } from './rpc.js';
@@ -32,6 +32,7 @@ import { CelebrationToast } from "./components/CelebrationToast.js";
 import { createBaseAccountSDK } from '@base-org/account';
 import { SignInWithBaseButton } from '@base-org/account-ui/react';
 import { useChatActions } from './hooks/useChatActions.js';
+
 
 
 export default function App() {
@@ -560,8 +561,8 @@ export default function App() {
                   </div>
                 </div> */}
 
-                {/* Display stored proof data */}
-                {/* <div className="space-y-3 text-sm">
+            {/* Display stored proof data */}
+            {/* <div className="space-y-3 text-sm">
                   <div className="bg-gray-800 rounded p-3">
                     <p className="text-gray-400 mb-1">Connected Address:</p>
                     <p className="font-mono text-blue-400 break-all">
@@ -710,7 +711,51 @@ export default function App() {
                                   : 'bg-gray-700 mx-auto text-center text-xs'
                                 }`}
                             >
-                              <p className="text-sm">{msg.decrypted || msg.ciphertext}</p>
+                              <p className="text-sm flex items-center gap-1 overflow-visible">
+                                {msg.type === "system" && (
+                                  msg.verified ? (
+                                    <span className="relative group inline-flex items-center">
+                                      <Fingerprint size={14} className="text-green-400 shrink-0" />
+                                      <span
+                                        role="tooltip"
+                                        className="pointer-events-none absolute -top-2 left-20 -translate-x-1/2
+                     px-2 py-1 text-xs rounded bg-gray-900 text-blue-100
+                     border border-gray-700 opacity-0 group-hover:opacity-100
+                     transition-opacity whitespace-nowrap z-50"
+                                      >
+                                        Identity proof verified
+                                      </span>
+                                    </span>
+                                  ) : (
+                                    msg.direction === "incoming" && (
+                                      <span className="relative group inline-flex items-center">
+                                        <X size={14} className="text-red-500 shrink-0" />
+                                        <span
+                                          role="tooltip"
+                                          className="pointer-events-none absolute -top-7 left-20 -translate-x-1/2
+                       px-2 py-1 text-xs rounded bg-gray-900 text-red-100
+                       border border-gray-700 opacity-0 group-hover:opacity-100
+                       transition-opacity whitespace-nowrap z-50"
+                                        >
+                                          Identity proof not verified
+                                        </span>
+                                      </span>
+                                    )
+                                  )
+                                )}
+
+                                {msg.type === "system" && msg.decrypted ? (
+                                  <>
+                                    <span className="font-bold">{msg.decrypted.split(":")[0]}:</span>
+                                    {msg.decrypted.split(":").slice(1).join(":")}
+                                  </>
+                                ) : (
+                                  msg.decrypted || msg.ciphertext
+                                )}
+                              </p>
+
+
+
                               <div className="flex justify-between items-center mt-1">
                                 <span className="text-xs text-gray-300">
                                   {new Date(msg.timestamp).toLocaleTimeString()}

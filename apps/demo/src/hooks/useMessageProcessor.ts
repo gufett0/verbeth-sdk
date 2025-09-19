@@ -210,6 +210,7 @@ export const useMessageProcessor = ({
           type: "system" as const,
           ownerAddress: address,
           status: "confirmed" as const,
+          verified: isVerified,
         };
 
         await dbService.saveMessage(handshakeMessage);
@@ -354,6 +355,7 @@ export const useMessageProcessor = ({
           type: "system" as const,
           ownerAddress: address,
           status: "confirmed" as const,
+          verified: isVerified,
         };
 
         await dbService.saveMessage(responseMessage);

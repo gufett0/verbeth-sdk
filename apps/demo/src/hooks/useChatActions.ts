@@ -114,7 +114,7 @@ export const useChatActions = ({
           blockTimestamp: Date.now(),
           blockNumber: 0,
           direction: "outgoing" as const,
-          decrypted: `Request: "${message}"`,
+          decrypted: `Request sent: "${message}"`,
           read: true,
           nonce: 0,
           dedupKey: `handshake-${tx.hash}`,

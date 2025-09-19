@@ -55,6 +55,7 @@ export interface Message {
   dedupKey: string; // `${sender}:${topic}:${nonce}`
   type: 'text' | 'system';
   status: 'pending' | 'confirmed' | 'failed';
+  verified?: boolean;
 }
 
 export interface PendingHandshake {

@@ -188,6 +188,7 @@ describe("Verify Identity & Handshake (Unified)", () => {
       const responseEvent: HandshakeResponseLog = {
         inResponseTo: keccak256(toUtf8Bytes("test-handshake")),
         responder: responderWallet.address,
+        responderEphemeralR: hexlify(responderEphemeral.publicKey),
         ciphertext: payload,
       };
 
@@ -229,6 +230,7 @@ describe("Verify Identity & Handshake (Unified)", () => {
       const responseEvent: HandshakeResponseLog = {
         inResponseTo: keccak256(toUtf8Bytes("test-handshake")),
         responder: responderWallet.address,
+        responderEphemeralR: hexlify(responderEphemeral.publicKey),
         ciphertext: payload,
       };
 

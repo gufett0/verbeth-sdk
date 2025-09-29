@@ -97,6 +97,23 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |   - Unified Key Management                              |
 ```
 
+
+## Contract
+
+/// We include `sender` (= msg.sender) as an indexed event field to bind each log to the
+/// actual caller account (EOA or smart account) and make it Bloom-filterable. A tx receipt/log
+/// does not expose the immediate caller of this contract—it only contains the emitter address
+/// (this contract) and the topics/data—so recovering `msg.sender` would require execution traces.
+/// Under ERC-4337 this is even harder: the outer tx targets EntryPoint and tx.from is the bundler,
+/// not the smart account. Without `sender` in the event, reliably linking a log to the originating
+/// account requires correlating EntryPoint internals or traces, which is non-standard and costly.
+
+### Deployed Addresses
+
+LogChainV1 `0x41a3eaC0d858028E9228d1E2092e6178fc81c4f0`
+
+ERC1967Proxy `0x62720f39d5Ec6501508bDe4D152c1E13Fd2F6707`
+
 ## Features
 
 - Stateless encrypted messaging via logs
@@ -121,6 +138,7 @@ It supports both EOAs and Smart Contract Accounts — whether they’re already 
 **Non-repudiation**: By default, confidentiality and integrity are guaranteed by AEAD with NaCl box. Additionally, the sender can attach a detached Ed25519 signature over (epk || nonce || ciphertext) using the Ed25519 key bound in the handshake. This effectively provides per-message origin authentication that is verifiable: a recipient (or any third party) can prove the message was produced by the holder of that specific Ed25519 key. Otherwise, attribution relies on context, making sender spoofing at the application layer harder to detect.
 
 **Forward secrecy**: Each message uses a fresh sender ephemeral key. This provides sender-side forward secrecy for sent messages: once the sender deletes the ephemeral secret, a future compromise of their long-term keys does not expose past ciphertexts. Handshake responses also use ephemeral↔ephemeral, enjoying the same property. However, if a recipient’s long-term X25519 key is compromised, all past messages addressed to them remain decryptable. A double-ratchet (or ephemeral↔ephemeral messaging) can extend forward secrecy to the recipient side (see [here](#improvement-ideas)).
+
 
 ## Example Usage (WIP)
 

@@ -19,6 +19,7 @@ export interface HandshakeLog {
 export interface HandshakeResponseLog {
   inResponseTo: string;
   responder: string;
+  responderEphemeralR: string;
   ciphertext: string; // Contains unified pubKeys + identityProof encrypted
 }
 

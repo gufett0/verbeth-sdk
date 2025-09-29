@@ -7,6 +7,7 @@ import {
   Contract,
   parseEther,
   NonceManager,
+  getBytes,
 } from "ethers";
 
 import nacl from "tweetnacl";
@@ -16,8 +17,9 @@ import {
   respondToHandshake,
   DirectEntryPointExecutor,
   deriveIdentityKeyPairWithProof,
-  verifyHandshakeIdentity, 
+  verifyHandshakeIdentity,
   verifyHandshakeResponseIdentity,
+  computeTagFromInitiator,
 } from "../packages/sdk/src/index.js";
 
 import {
@@ -172,13 +174,10 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
     );
 
     expect(handshakeEvents).toHaveLength(1);
-    
-    const inResponseTo = initiateReceipt.hash;
 
     const respondTx = await respondToHandshake({
       executor: responderExecutor,
-      inResponseTo,
-      initiatorPubKey: ownerIdentityKeys.keyPair.publicKey,
+      initiatorPubKey: ephemeralKeys.publicKey,
       responderIdentityKeyPair: responderIdentityKeys.keyPair,
       note: "Hello back from responder smart account!",
       identityProof: responderIdentityKeys.identityProof,
@@ -189,7 +188,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
     expect(respondReceipt.status).toBe(1);
 
     const responseFilter = logChain.filters.HandshakeResponse();
-    
+
     while ((await provider.getBlockNumber()) < respondReceipt.blockNumber) {
       await new Promise((r) => setTimeout(r, 10));
     }
@@ -206,7 +205,12 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
     expect(responseEvent.args.responder).toBe(
       await responderSmartAccount.getAddress()
     );
-    expect(responseEvent.args.inResponseTo).toBe(inResponseTo);
+    const Rbytes = getBytes(responseEvent.args.responderEphemeralR);
+    const expectedTag = computeTagFromInitiator(
+      ephemeralKeys.secretKey,
+      Rbytes
+    );
+    expect(responseEvent.args.inResponseTo).toBe(expectedTag);
   }, 30000);
 
   it("should handle multiple handshake responses", async () => {
@@ -240,12 +244,10 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
 
     const responseReceipts: any[] = [];
     for (let i = 0; i < handshakeData.length; i++) {
-      const data = handshakeData[i];
 
       const respondTx = await respondToHandshake({
         executor: responderExecutor,
-        inResponseTo: data.inResponseTo,
-        initiatorPubKey: ownerIdentityKeys.keyPair.publicKey,
+        initiatorPubKey: handshakeData[i].ephemeralKeys.publicKey,
         responderIdentityKeyPair: responderIdentityKeys.keyPair,
         note: `Batch response ${i + 1}`,
         identityProof: responderIdentityKeys.identityProof,
@@ -273,8 +275,12 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
     expect(responseEvents.length).toBeGreaterThanOrEqual(handshakeCount);
 
     for (let i = 0; i < handshakeCount; i++) {
+      const expectedTagI = computeTagFromInitiator(
+        handshakeData[i].ephemeralKeys.secretKey,
+        getBytes(responseEvents[i].args.responderEphemeralR)
+      );
       const matchingEvent = responseEvents.find(
-        (event) => event.args.inResponseTo === handshakeData[i].inResponseTo
+        (event) => event.args.inResponseTo === expectedTagI
       );
       expect(matchingEvent).toBeDefined();
       expect(matchingEvent?.args.responder).toBe(
@@ -288,7 +294,6 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
 
     const respondTx = await respondToHandshake({
       executor: responderExecutor,
-      inResponseTo: fakeHandshakeId,
       initiatorPubKey: ownerIdentityKeys.keyPair.publicKey,
       responderIdentityKeyPair: responderIdentityKeys.keyPair,
       note: "Response to non-existent handshake",
@@ -307,7 +312,10 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
     );
 
     expect(responseEvents).toHaveLength(1);
-    expect(responseEvents[0].args.inResponseTo).toBe(fakeHandshakeId);
+    expect(responseEvents[0].args.inResponseTo).not.toBe(fakeHandshakeId);
+    expect(
+      /^0x[0-9a-fA-F]{64}$/.test(responseEvents[0].args.inResponseTo)
+    ).toBe(true);
     expect(responseEvents[0].args.responder).toBe(
       await responderSmartAccount.getAddress()
     );
@@ -340,7 +348,6 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
 
       const respondTx = await respondToHandshake({
         executor: responderExecutor,
-        inResponseTo,
         initiatorPubKey: ownerIdentityKeys.keyPair.publicKey,
         responderIdentityKeyPair: responderIdentityKeys.keyPair,
         note,
@@ -387,7 +394,6 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       plaintextPayload: handshakeEvent.args.plaintextPayload,
     };
 
-
     const isValidHandshake = await verifyHandshakeIdentity(
       handshakeLog,
       provider
@@ -428,7 +434,6 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
 
     const respondTx = await respondToHandshake({
       executor: responderExecutor,
-      inResponseTo,
       initiatorPubKey: aliceEphemeralPubKeyFromEvent,
       responderIdentityKeyPair: responderIdentityKeys.keyPair,
       note: "Response identity verification test",
@@ -452,6 +457,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
     const responseLog = {
       inResponseTo: responseEvent.args.inResponseTo,
       responder: responseEvent.args.responder,
+      responderEphemeralR: responseEvents[0].args.responderEphemeralR,
       ciphertext: responseEvent.args.ciphertext,
     };
 
@@ -538,7 +544,6 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
 
     const respondTx = await respondToHandshake({
       executor: responderExecutor,
-      inResponseTo,
       initiatorPubKey: ownerIdentityKeys.keyPair.publicKey,
       responderIdentityKeyPair: responderIdentityKeys.keyPair,
       note: "Wrong identity key test response",
@@ -562,6 +567,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
     const responseLog = {
       inResponseTo: responseEvent.args.inResponseTo,
       responder: responseEvent.args.responder,
+      responderEphemeralR: responseEvents[0].args.responderEphemeralR,
       ciphertext: responseEvent.args.ciphertext,
     };
 
@@ -622,12 +628,11 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       );
 
       const aliceEphemeralPubKeyFromEvent = new Uint8Array(
-        Buffer.from(handshakeEvents[0].args.ephemeralPubKey.slice(2), 'hex')
+        Buffer.from(handshakeEvents[0].args.ephemeralPubKey.slice(2), "hex")
       );
 
       const respondTx = await respondToHandshake({
         executor: responderExecutor,
-        inResponseTo,
         initiatorPubKey: aliceEphemeralPubKeyFromEvent,
         responderIdentityKeyPair: responderIdentityKeys.keyPair,
         note: `Batch verification response ${i + 1}`,
@@ -647,6 +652,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       const responseLog = {
         inResponseTo: responseEvents[0].args.inResponseTo,
         responder: responseEvents[0].args.responder,
+        responderEphemeralR: responseEvents[0].args.responderEphemeralR,
         ciphertext: responseEvents[0].args.ciphertext,
       };
 

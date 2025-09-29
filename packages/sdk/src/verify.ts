@@ -1,6 +1,6 @@
 // packages/sdk/src/verify.ts
-import { JsonRpcProvider, getAddress, hexlify } from "ethers";
-import { decryptAndExtractHandshakeKeys } from "./crypto.js";
+import { JsonRpcProvider, getBytes, hexlify, getAddress } from "ethers";
+import { decryptAndExtractHandshakeKeys, computeTagFromInitiator } from "./crypto.js";
 import { HandshakeLog, HandshakeResponseLog, IdentityProof } from "./types.js";
 import { parseHandshakePayload, parseHandshakeKeys } from "./payload.js";
 import {
@@ -244,6 +244,16 @@ export async function verifyAndExtractHandshakeResponseKeys(
     note?: string;
   };
 }> {
+
+  const Rbytes = getBytes(responseEvent.responderEphemeralR); // hex -> Uint8Array
+  const expectedTag = computeTagFromInitiator(
+    initiatorEphemeralSecretKey,
+    Rbytes
+  );
+  if (expectedTag !== responseEvent.inResponseTo) {
+    return { isValid: false };
+  }
+
   const extractedResponse = decryptAndExtractHandshakeKeys(
     responseEvent.ciphertext,
     initiatorEphemeralSecretKey

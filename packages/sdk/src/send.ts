@@ -6,6 +6,7 @@ import {
   hexlify,
   Signer
 } from "ethers";
+import nacl from 'tweetnacl';
 import { getNextNonce } from './utils/nonce.js';
 import { encryptMessage, encryptStructuredPayload } from './crypto.js';
 import { 
@@ -16,7 +17,8 @@ import {
 } from './payload.js';
 import { IdentityKeyPair, IdentityProof } from './types.js';  
 import { IExecutor } from './executor.js';
-import nacl from 'tweetnacl';
+import { computeTagFromResponder } from './crypto.js'
+
 
 /**
  * Sends an encrypted message assuming recipient's keys were already obtained via handshake.
@@ -115,7 +117,6 @@ export async function initiateHandshake({
  */
 export async function respondToHandshake({
   executor,
-  inResponseTo,
   initiatorPubKey,
   responderIdentityKeyPair,
   responderEphemeralKeyPair,
@@ -124,7 +125,6 @@ export async function respondToHandshake({
   signer
 }: {
   executor: IExecutor;
-  inResponseTo: string;
   initiatorPubKey: Uint8Array;
   responderIdentityKeyPair: IdentityKeyPair;
   responderEphemeralKeyPair?: nacl.BoxKeyPair;
@@ -149,10 +149,18 @@ export async function respondToHandshake({
   // Encrypt the response for the initiator
   const payload = encryptStructuredPayload(
     responseContent,
-    initiatorPubKey,              // Encrypt to initiator's X25519 key
+    initiatorPubKey,              // Encrypt to initiator's X25519 (ephemeral) key
     ephemeralKeyPair.secretKey,
     ephemeralKeyPair.publicKey
   );
+
+
+  // Generate separate ephemeral key (R,r) just for the tag
+  const tagKeyPair = nacl.box.keyPair();                
+  const inResponseTo = computeTagFromResponder(
+    tagKeyPair.secretKey,
+    initiatorPubKey
+  );
   
-  return executor.respondToHandshake(inResponseTo, toUtf8Bytes(payload));
+  return executor.respondToHandshake(inResponseTo, hexlify(tagKeyPair.publicKey), toUtf8Bytes(payload));
 }

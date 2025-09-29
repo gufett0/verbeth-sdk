@@ -4,13 +4,11 @@ import { useState, useEffect, useCallback } from "react";
 import { AbiCoder } from "ethers";
 import {
   decryptMessage,
-  decryptHandshakeResponse,
   parseHandshakePayload,
   verifyHandshakeIdentity,
-  verifyHandshakeResponseIdentity,
   IdentityKeyPair,
-  extractKeysFromHandshakeResponse,
   decodeUnifiedPubKeys,
+  verifyAndExtractHandshakeResponseKeys,
 } from "@verbeth/sdk";
 import { dbService } from "../services/DbService.js";
 import {
@@ -235,8 +233,14 @@ export const useMessageProcessor = ({
 
       try {
         const log = event.rawLog;
+
+        // decode both responderEphemeralR and ciphertext from data
         const abiCoder = new AbiCoder();
-        const [ciphertextBytes] = abiCoder.decode(["bytes"], log.data);
+        const [responderEphemeralRBytes, ciphertextBytes] = abiCoder.decode(
+          ["bytes32", "bytes"],
+          log.data
+        );
+
         const ciphertextJson = new TextDecoder().decode(
           hexToUint8Array(ciphertextBytes)
         );
@@ -244,8 +248,9 @@ export const useMessageProcessor = ({
         const responder = "0x" + log.topics[2].slice(-40);
         const inResponseTo = log.topics[1];
 
-        // Load fresh contacts from database instead of using stale parameter
+        // Load fresh contacts from database
         const currentContacts = await dbService.getAllContacts(address);
+
         onLog(
           `🔍 Debug: Loaded ${currentContacts.length} contacts from DB for handshake response`
         );
@@ -267,54 +272,44 @@ export const useMessageProcessor = ({
           return;
         }
 
-        const decryptedResponse = decryptHandshakeResponse(
-          ciphertextJson,
-          contact.ephemeralKey
+        const responseEvent = {
+          inResponseTo,
+          responder,
+          responderEphemeralR: responderEphemeralRBytes, 
+          ciphertext: ciphertextJson,
+        };
+
+        const result = await verifyAndExtractHandshakeResponseKeys(
+          responseEvent,
+          contact.ephemeralKey, // initiator's ephemeral secret key
+          readProvider
         );
 
-        if (!decryptedResponse) {
+        if (!result.isValid || !result.keys) {
           onLog(
-            `✗ Failed to decrypt handshake response from ${responder.slice(
+            `❌ Failed to verify handshake response from ${responder.slice(
               0,
               8
-            )}...`
+            )}... - invalid signature or tag mismatch`
           );
           return;
         }
 
-        const extractedKeys =
-          extractKeysFromHandshakeResponse(decryptedResponse);
-        if (!extractedKeys) {
-          onLog(`✗ Failed to extract keys from handshake response`);
-          return;
-        }
+        const { identityPubKey, signingPubKey, ephemeralPubKey, note } =
+          result.keys;
 
-        // Verify response identity
-        let isVerified = false;
-        try {
-          const responseLog = {
-            inResponseTo,
-            responder,
-            ciphertext: ciphertextJson,
-          };
-
-          isVerified = await verifyHandshakeResponseIdentity(
-            responseLog,
-            extractedKeys.identityPubKey,
-            contact.ephemeralKey,
-            readProvider
-          );
-        } catch (error) {
-          onLog(`Failed to verify handshake response identity: ${error}`);
-        }
+        onLog(
+          `✅ Handshake response verified from ${responder.slice(0, 8)}...`
+        );
 
         // Update contact to established
         const updatedContact: Contact = {
           ...contact,
           status: "established" as ContactStatus,
-          identityPubKey: extractedKeys.identityPubKey,
-          signingPubKey: extractedKeys.signingPubKey,
-          lastMessage: decryptedResponse.note || decryptedResponse.note,
+          identityPubKey,
+          signingPubKey,
+          ephemeralKey: ephemeralPubKey, // Store responder's ephemeral key
+          lastMessage: note || "Handshake accepted",
           lastTimestamp: Date.now(),
         };
 
@@ -330,10 +325,11 @@ export const useMessageProcessor = ({
         );
 
         onLog(
-          `🤝 Handshake completed with ${responder.slice(0, 8)}... ${
-            isVerified ? "Verified ✅" : "Unverified! ⚠️"
-          }: "${decryptedResponse.note}"`
+          `🤝 Handshake completed with ${responder.slice(0, 8)}... ✅: "${
+            note || "No message"
+          }"`
         );
+
         // Add handshake response message to chat
         const conversationTopic = generateConversationTopic(address, responder);
         const responseMessage: Message = {
@@ -346,22 +342,21 @@ export const useMessageProcessor = ({
           blockTimestamp: Date.now(),
           blockNumber: 0,
           direction: "incoming" as const,
-          decrypted: `Request accepted: "${
-            decryptedResponse.note || "No message"
-          }"`,
+          decrypted: `Request accepted: "${note || "No message"}"`,
           read: true,
           nonce: 0,
           dedupKey: `handshake-response-${inResponseTo}`,
           type: "system" as const,
           ownerAddress: address,
           status: "confirmed" as const,
-          verified: isVerified,
+          verified: true, // Always true if verifyAndExtractHandshakeResponseKeys returned isValid: true
         };
 
         await dbService.saveMessage(responseMessage);
         setMessages((prev) => [...prev, responseMessage]);
       } catch (error) {
         onLog(`✗ Failed to process handshake response log: ${error}`);
+        console.error("Full error:", error);
       }
     },
     [address, readProvider, onLog]

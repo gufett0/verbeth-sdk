@@ -180,7 +180,6 @@ export const useChatActions = ({
       try {
         const tx = await respondToHandshake({
           executor,
-          inResponseTo: handshake.id,
           initiatorPubKey: handshake.ephemeralPubKey,
           responderIdentityKeyPair: identityKeyPair,
           note: responseMessage,

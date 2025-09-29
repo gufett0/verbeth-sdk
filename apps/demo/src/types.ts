@@ -3,8 +3,8 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 
 /* ------------------------------- CONSTANTS -------------------------------- */
 export const LOGCHAIN_SINGLETON_ADDR =
-  '0xb0fD25AAa5f901D9A0931b19287776440FaBd031';
-export const CONTRACT_CREATION_BLOCK = 32_902_584;
+  '0x41a3eaC0d858028E9228d1E2092e6178fc81c4f0';
+export const CONTRACT_CREATION_BLOCK = 36_053_269;
 export const INITIAL_SCAN_BLOCKS = 1_000;
 export const MAX_RETRIES = 3;
 export const MAX_RANGE_PROVIDER = 2_000;
@@ -20,7 +20,7 @@ export const EVENT_SIGNATURES = {
     toUtf8Bytes('Handshake(bytes32,address,bytes,bytes,bytes)'),
   ),
   HandshakeResponse: keccak256(
-    toUtf8Bytes('HandshakeResponse(bytes32,address,bytes)'),
+    toUtf8Bytes('HandshakeResponse(bytes32,address,bytes32,bytes)'),
   ),
 };
 

@@ -1,8 +1,41 @@
-# VerbEth SDK
+<h1 align="center">
+    Verbeth
+</h1>
 
-End-to-end encrypted messaging over Ethereum logs, using the blockchain as the only transport layer. Uses `tweetnacl.box` to encrypt/decrypt messages with ephemeral keys and optional sender identity. Ensures forward secrecy and compatibility with smart accounts.
+<p align="center">
+    <!-- <a href="https://www.npmjs.com/package/@verbeth/sdk">
+        <img src="https://img.shields.io/npm/v/@verbeth/sdk?style=flat-square">
+    </a> -->
+    <a href="LICENSE">
+        <img src="https://img.shields.io/github/license/okrame/verbeth-sdk?style=flat-square">
+    </a>
+    <a href="https://github.com/okrame/verbeth-sdk/actions">
+  <img src="https://img.shields.io/github/actions/workflow/status/okrame/verbeth-sdk/ci.yml?branch=main&style=flat-square">
+</a>
+    <a href="https://www.typescriptlang.org/">
+        <img src="https://img.shields.io/badge/TypeScript-5.4+-blue?style=flat-square&logo=typescript">
+    </a>
+    <!-- <a href="https://codecov.io/gh/okrame/verbeth-sdk">
+        <img src="https://img.shields.io/codecov/c/github/okrame/verbeth-sdk?style=flat-square">
+    </a> -->
+</p>
 
-## How It Works: Alice & Bob (High-level Flow)
+<p align="center">
+E2EE messaging over Ethereum logs, using the blockchain as the only transport layer.
+</p>
+
+### Built With
+
+This SDK and the [demo app](https://verbeth-demo.vercel.app/) rely on battle-tested libraries:
+
+- [**TweetNaCl**](https://tweetnacl.js.org/) – Encryption/decryption (NaCl box)
+- [**Ethers v6**](https://docs.ethers.org/v6/) – Core Ethereum interactions, providers, contracts, signing
+- [**Viem**](https://viem.sh/) – Specific for EIP-1271/6492 verification and WebAuthn accounts
+- [**Dexie**](https://dexie.org/) – Local IndexedDB storage
+
+---
+
+## How can Alice & Bob use it?
 
 Alice wants to initiate a secure chat with Bob using only the blockchain.
 
@@ -22,8 +55,6 @@ Alice wants to initiate a secure chat with Bob using only the blockchain.
    - Alice signs messages using her **signing key**
    - Bob and Alice filter messages using topics, timestamp, or sender
 
-
-
 ```
 ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |                            |                            |
@@ -32,11 +63,11 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |                 Identity and Key Derivation             |
       |--------------------------->|                            |
       |  Generate identity keys     |                           |
-      | Sign identity-binding msg  |                            |                            
+      | Sign identity-binding msg  |                            |
       |  Create IdentityProof      |                            |
       |                            |<---------------------------|
-      |                            |  Generate identity keys    |                            
-      |                            | Sign identity-binding msg  |                         
+      |                            |  Generate identity keys    |
+      |                            | Sign identity-binding msg  |
       |                            |   Create IdentityProof     |
       |                            |                            |
       |  PHASE 1: Alice Initiates Handshake                     |
@@ -97,7 +128,6 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |   - Unified Key Management                              |
 ```
 
-
 ## Contract
 
 /// We include `sender` (= msg.sender) as an indexed event field to bind each log to the
@@ -139,7 +169,6 @@ It supports both EOAs and Smart Contract Accounts — whether they’re already 
 
 **Forward secrecy**: Each message uses a fresh sender ephemeral key. This provides sender-side forward secrecy for sent messages: once the sender deletes the ephemeral secret, a future compromise of their long-term keys does not expose past ciphertexts. Handshake responses also use ephemeral↔ephemeral, enjoying the same property. However, if a recipient’s long-term X25519 key is compromised, all past messages addressed to them remain decryptable. A double-ratchet (or ephemeral↔ephemeral messaging) can extend forward secrecy to the recipient side (see [here](#improvement-ideas)).
 
-
 ## Example Usage (WIP)
 
 ```ts
@@ -148,33 +177,37 @@ import {
   initiateHandshake,
   sendEncryptedMessage,
   deriveIdentityKeyPairWithProof,
-} from '@verbeth/sdk';
+} from "@verbeth/sdk";
 
 // 1. Generate or load your long-term identity keypair
-const { publicKey, secretKey } = await deriveIdentityKeyPairWithProof(walletClient);
+const { publicKey, secretKey } = await deriveIdentityKeyPairWithProof(
+  walletClient
+);
 
 // 2. Receive and decrypt a message from an on-chain log event
 const decrypted = decryptLog(eventLog, secretKey);
 
 // 3. Start a handshake with another user
 await initiateHandshake({
-  contract,                       // LogChainV1
-  recipientAddress: '0xBob...',   
-  ephemeralPubKey: ephemeralKey.publicKey, 
-  plaintextPayload: 'Hi Bob, ping from Alice', // (optional) plaintext handshake message
+  contract, // LogChainV1
+  recipientAddress: "0xBob...",
+  ephemeralPubKey: ephemeralKey.publicKey,
+  plaintextPayload: "Hi Bob, ping from Alice", // (optional) plaintext handshake message
 });
 
 // 4. Send an encrypted message (after handshake is established)
 await sendEncryptedMessage({
-  contract,                        
-  recipientAddress: '0xBob...',
-  message: 'Hello again, Bob!',
+  contract,
+  recipientAddress: "0xBob...",
+  message: "Hello again, Bob!",
   senderEphemeralKeyPair: ephemeralKey, // ephemeral keypair used for forward secrecy
-  recipientPublicKey,              
+  recipientPublicKey,
 });
 ```
+
 ## Improvement ideas
-| Title                                              | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Refs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| -------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+
+| Title                                              | Description                                                                                                                                                                                                                                                                                                                                                                                                                   | Refs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Bidirectional Forward Secrecy (session ratchet)    | Achieve **end-to-end, bilateral FS** even if the **recipient’s long-term X25519** is later compromised. Two options: (1) switch messaging to **ephemeral↔ephemeral** (derive per-message DH and discard secrets), or (2) derive a **symmetric session ratchet** from the handshake (e.g., **Double Ratchet** for 1:1; **MLS** for 1\:many) so every message advances sending/receiving chains and old keys are irrecoverable. | Signal **Double Ratchet** spec (post-X3DH): [https://signal.org/docs/specifications/doubleratchet/](https://signal.org/docs/specifications/doubleratchet/) ; **MLS** (RFC 9420): [https://www.rfc-editor.org/rfc/rfc9420](https://www.rfc-editor.org/rfc/rfc9420) ; Matrix **Olm/Megolm** (Double Ratchet for 1:1 / group): [https://gitlab.matrix.org/matrix-org/olm](https://gitlab.matrix.org/matrix-org/olm) ; **Status/Waku** Double Ratchet transport: [https://specs.status.im/spec/5](https://specs.status.im/spec/5) and Waku X3DH/DR notes: [https://rfc.vac.dev/waku/standards/application/53/x3dh/](https://rfc.vac.dev/waku/standards/application/53/x3dh/) ; **XMTP** (MLS-based): [https://docs.xmtp.org/protocol/overview](https://docs.xmtp.org/protocol/overview) |
-| Passkeys & WebAuthn PRF for encryption of messages | Let smart accounts encrypt messages with the same passkey used for UserOps. Use the WebAuthn **PRF** extension to derive an AEAD key at auth time (plus per-message salt/nonce) so users only manage the passkey—gaining stronger security (hardware/biometric protection) and portability/recovery (OS-synced passkeys or hardware keys).                                                                                                                                                                 | [Corbado: Passkeys & PRF](https://www.corbado.com/blog/passkeys-prf-webauthn), [W3C WebAuthn L3: PRF extension](https://www.w3.org/TR/webauthn-3/), [Chrome: Intent to Ship (PRF)](https://groups.google.com/a/chromium.org/g/blink-dev/c/iTNOgLwD2bI), [SimpleWebAuthn: PRF docs](https://simplewebauthn.dev/docs/advanced/prf)                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Passkeys & WebAuthn PRF for encryption of messages | Let smart accounts encrypt messages with the same passkey used for UserOps. Use the WebAuthn **PRF** extension to derive an AEAD key at auth time (plus per-message salt/nonce) so users only manage the passkey—gaining stronger security (hardware/biometric protection) and portability/recovery (OS-synced passkeys or hardware keys).                                                                                    | [Corbado: Passkeys & PRF](https://www.corbado.com/blog/passkeys-prf-webauthn), [W3C WebAuthn L3: PRF extension](https://www.w3.org/TR/webauthn-3/), [Chrome: Intent to Ship (PRF)](https://groups.google.com/a/chromium.org/g/blink-dev/c/iTNOgLwD2bI), [SimpleWebAuthn: PRF docs](https://simplewebauthn.dev/docs/advanced/prf)                                                                                                                                                                                                                                                                                                                                                                                                                                                    |

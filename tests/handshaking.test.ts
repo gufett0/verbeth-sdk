@@ -20,6 +20,7 @@ import {
   verifyHandshakeIdentity,
   verifyHandshakeResponseIdentity,
   computeTagFromInitiator,
+  decodeUnifiedPubKeys,
 } from "../packages/sdk/src/index.js";
 
 import {
@@ -175,6 +176,14 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
 
     expect(handshakeEvents).toHaveLength(1);
 
+    const decodedInitiator = decodeUnifiedPubKeys(
+      Uint8Array.from(
+        Buffer.from(handshakeEvents[0].args.pubKeys.slice(2), "hex")
+      )
+    );
+    if (!decodedInitiator) throw new Error("Invalid initiator unified pubkeys");
+    const initiatorIdentityPubKey = decodedInitiator.identityPubKey;
+
     const respondTx = await respondToHandshake({
       executor: responderExecutor,
       initiatorPubKey: ephemeralKeys.publicKey,
@@ -182,8 +191,8 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       note: "Hello back from responder smart account!",
       identityProof: responderIdentityKeys.identityProof,
       signer: responderOwner,
+      initiatorIdentityPubKey,
     });
-
     const respondReceipt = await respondTx.wait();
     expect(respondReceipt.status).toBe(1);
 
@@ -244,6 +253,22 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
 
     const responseReceipts: any[] = [];
     for (let i = 0; i < handshakeData.length; i++) {
+      const handshakeFilter = logChain.filters.Handshake();
+      const handshakeEventsForItem = await logChain.queryFilter(
+        handshakeFilter,
+        handshakeData[i].initiateReceipt.blockNumber,
+        handshakeData[i].initiateReceipt.blockNumber
+      );
+      if (handshakeEventsForItem.length !== 1)
+        throw new Error("Expected 1 handshake event for item");
+      const decodedInitiatorForItem = decodeUnifiedPubKeys(
+        Uint8Array.from(
+          Buffer.from(handshakeEventsForItem[0].args.pubKeys.slice(2), "hex")
+        )
+      );
+      if (!decodedInitiatorForItem)
+        throw new Error("Invalid initiator unified pubkeys for item");
+      const initiatorIdentityPubKey = decodedInitiatorForItem.identityPubKey;
 
       const respondTx = await respondToHandshake({
         executor: responderExecutor,
@@ -252,6 +277,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
         note: `Batch response ${i + 1}`,
         identityProof: responderIdentityKeys.identityProof,
         signer: responderOwner,
+        initiatorIdentityPubKey,
       });
 
       const respondReceipt = await respondTx.wait();
@@ -344,15 +370,37 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       });
 
       const initiateReceipt = await initiateHandshakeTx.wait();
-      const inResponseTo = initiateReceipt.hash;
+
+      const handshakeFilter = logChain.filters.Handshake();
+      const events = await logChain.queryFilter(
+        handshakeFilter,
+        initiateReceipt.blockNumber,
+        initiateReceipt.blockNumber
+      );
+      if (events.length !== 1) {
+        throw new Error(`Expected 1 Handshake event, got ${events.length}`);
+      }
+      const ev = events[0];
+
+      const decodedInitiator = decodeUnifiedPubKeys(
+        Uint8Array.from(Buffer.from(ev.args.pubKeys.slice(2), "hex"))
+      );
+      if (!decodedInitiator)
+        throw new Error("Invalid initiator unified pubkeys");
+      const initiatorIdentityPubKey = decodedInitiator.identityPubKey;
+
+      const aliceEphemeralPubKeyFromEvent = Uint8Array.from(
+        Buffer.from(ev.args.ephemeralPubKey.slice(2), "hex")
+      );
 
       const respondTx = await respondToHandshake({
         executor: responderExecutor,
-        initiatorPubKey: ownerIdentityKeys.keyPair.publicKey,
+        initiatorPubKey: aliceEphemeralPubKeyFromEvent, 
         responderIdentityKeyPair: responderIdentityKeys.keyPair,
-        note,
+        note: `Batch verification response ${i + 1}`,
         identityProof: responderIdentityKeys.identityProof,
         signer: responderOwner,
+        initiatorIdentityPubKey, 
       });
 
       const respondReceipt = await respondTx.wait();

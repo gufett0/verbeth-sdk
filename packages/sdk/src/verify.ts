@@ -1,8 +1,8 @@
 // packages/sdk/src/verify.ts
 import { JsonRpcProvider, getBytes, hexlify, getAddress } from "ethers";
-import { decryptAndExtractHandshakeKeys, computeTagFromInitiator } from "./crypto.js";
-import { HandshakeLog, HandshakeResponseLog, IdentityProof } from "./types.js";
-import { parseHandshakePayload, parseHandshakeKeys } from "./payload.js";
+import { decryptAndExtractHandshakeKeys, computeTagFromInitiator, verifyDuplexTopicsChecksum, deriveDuplexTopics } from "./crypto.js";
+import { HandshakeLog, HandshakeResponseLog, IdentityProof, TopicInfoWire, DuplexTopics } from "./types.js";
+import { parseHandshakePayload, parseHandshakeKeys, decodeHandshakeResponseContent } from "./payload.js";
 import {
   Rpcish,
   makeViemPublicClient,
@@ -283,4 +283,37 @@ export async function verifyAndExtractHandshakeResponseKeys(
       note: extractedResponse.note,
     },
   };
+}
+
+/**
+ * Verify and derive duplex topics from a long-term DH secret.
+ * - Accepts either `tag` (inResponseTo) or a raw salt as KDF input.
+ * - Recomputes topicOut/topicIn deterministically from the identity DH.
+ * - If topicInfo is provided (from HSR), also verify the checksum.
+ * - Used by the initiator after decrypting a HandshakeResponse to confirm responder’s topics.
+ */
+export function verifyDerivedDuplexTopics({
+  myIdentitySecretKey,
+  theirIdentityPubKey,     
+  tag,            
+  salt,                     
+  topicInfo
+}: {
+  myIdentitySecretKey: Uint8Array;
+  theirIdentityPubKey: Uint8Array;
+  tag?: `0x${string}`;
+  salt?: Uint8Array;
+  topicInfo?: TopicInfoWire;
+}): { topics: DuplexTopics; ok?: boolean } {
+  const s = salt ?? (tag ? getBytes(tag) : undefined);
+  if (!s) throw new Error("Provide either salt or inResponseTo");
+
+  const { topicOut, topicIn, checksum } = deriveDuplexTopics(
+    myIdentitySecretKey,
+    theirIdentityPubKey,
+    s
+  );
+
+  const ok = topicInfo ? verifyDuplexTopicsChecksum(topicOut, topicIn, topicInfo.chk) : undefined;
+  return { topics: { topicOut, topicIn }, ok };
 }

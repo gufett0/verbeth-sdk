@@ -10,9 +10,9 @@ import {
   keccak256,
   toUtf8Bytes,
 } from "ethers";
-
 import nacl from "tweetnacl";
-
+import { hkdf } from "@noble/hashes/hkdf";
+import { sha256 } from "@noble/hashes/sha2";
 import {
   ExecutorFactory,
   initiateHandshake,
@@ -25,7 +25,6 @@ import {
   decryptMessage,
   deriveIdentityKeyPairWithProof,
 } from "../packages/sdk/src/index.js";
-
 import {
   ERC1967Proxy__factory,
   EntryPoint__factory,
@@ -35,11 +34,35 @@ import {
   TestSmartAccount__factory,
   type TestSmartAccount,
 } from "../packages/contracts/typechain-types/index.js";
-
 import { AnvilSetup } from "./setup.js";
 import { createMockSmartAccountClient } from "./utils.js";
 
 const ENTRYPOINT_ADDR = "0x0000000071727De22E5E9d8BAf0edAc6f37da032";
+
+const hexToBytes = (hex: string) =>
+  new Uint8Array(Buffer.from(hex.slice(2), "hex"));
+
+const deriveTopic = (
+  shared: Uint8Array,
+  info: string,
+  salt: Uint8Array
+): `0x${string}` => {
+  const okm = hkdf(sha256, shared, salt, toUtf8Bytes(info), 32);
+  return keccak256(okm) as `0x${string}`;
+};
+
+const deriveDuplex = (
+  mySecret: Uint8Array,
+  theirPub: Uint8Array,
+  saltHex: `0x${string}`
+) => {
+  const shared = nacl.scalarMult(mySecret, theirPub);
+  const salt = hexToBytes(saltHex);
+  return {
+    topicOut: deriveTopic(shared, "verbeth:topic-out:v1", salt), // Initiator→Responder
+    topicIn: deriveTopic(shared, "verbeth:topic-in:v1", salt), // Responder→Initiator
+  } as const;
+};
 
 describe("End-to-End Handshake and Messaging Tests", () => {
   let anvil: AnvilSetup;
@@ -51,21 +74,17 @@ describe("End-to-End Handshake and Messaging Tests", () => {
   let smartAccountOwner: Wallet;
   let eoaAccount1: NonceManager;
   let eoaAccount2: NonceManager;
-
   let smartAccountIdentityKeys: any;
   let eoaAccount1IdentityKeys: any;
   let eoaAccount2IdentityKeys: any;
-
   let smartAccountExecutor: DirectEntryPointExecutor;
   let eoaAccount1Executor: EOAExecutor;
   let eoaAccount2Executor: EOAExecutor;
-
   let deployerNM: NonceManager;
 
   beforeAll(async () => {
     anvil = new AnvilSetup();
     const forkUrl = "https://base-rpc.publicnode.com";
-
     await anvil.start(forkUrl);
     provider = anvil.provider;
 
@@ -167,7 +186,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
     it("should complete full handshake and bidirectional messaging flow", async () => {
       // 1. Smart Account initiates handshake with EOA
       const ephemeralKeys = nacl.box.keyPair();
-
       const initiateHandshakeTx = await initiateHandshake({
         executor: smartAccountExecutor,
         recipientAddress: (eoaAccount1.signer as Wallet).address,
@@ -211,16 +229,14 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       expect(isValidHandshake).toBe(true);
 
       // 3. EOA responds to handshake
-      const inResponseTo = initiateReceipt.hash;
-
       const respondTx = await respondToHandshake({
         executor: eoaAccount1Executor,
-        inResponseTo,
         initiatorPubKey: ephemeralKeys.publicKey,
         responderIdentityKeyPair: eoaAccount1IdentityKeys.keyPair,
         note: "Hello back from EOA!",
         identityProof: eoaAccount1IdentityKeys.identityProof,
         signer: eoaAccount1.signer as Wallet,
+        initiatorIdentityPubKey: smartAccountIdentityKeys.keyPair.publicKey,
       });
 
       const respondReceipt = await respondTx.wait();
@@ -244,8 +260,16 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       const responseLog = {
         inResponseTo: responseEvent.args.inResponseTo,
         responder: responseEvent.args.responder,
+        responderEphemeralR: responseEvent.args.responderEphemeralR,
         ciphertext: responseEvent.args.ciphertext,
       };
+
+      // Derive duplex topics dal long-term DH e salt = inResponseTo
+      const { topicOut: saToEoaTopic, topicIn: eoaToSaTopic } = deriveDuplex(
+        smartAccountIdentityKeys.keyPair.secretKey, // Alice (initiator) secret
+        eoaAccount1IdentityKeys.keyPair.publicKey, // Bob (responder) pub
+        responseEvent.args.inResponseTo as `0x${string}` // salt
+      );
 
       const isValidResponse = await verifyHandshakeResponseIdentity(
         responseLog,
@@ -258,11 +282,10 @@ describe("End-to-End Handshake and Messaging Tests", () => {
 
       // 5. Smart Account sends message to EOA
       const message1 = "First message from Smart Account to EOA";
-      const topic = "sa-to-eoa-chat";
 
       const sendTx1 = await sendEncryptedMessage({
         executor: smartAccountExecutor,
-        topic: keccak256(toUtf8Bytes(topic)),
+        topic: saToEoaTopic, // Initiator→Responder
         message: message1,
         recipientPubKey: eoaAccount1IdentityKeys.keyPair.publicKey,
         senderAddress: await smartAccount.getAddress(),
@@ -285,7 +308,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
 
       const sendTx2 = await sendEncryptedMessage({
         executor: eoaAccount1Executor,
-        topic: keccak256(toUtf8Bytes(topic)),
+        topic: eoaToSaTopic, // Responder→Initiator
         message: message2,
         recipientPubKey: smartAccountIdentityKeys.keyPair.publicKey,
         senderAddress: (eoaAccount1.signer as Wallet).address,
@@ -365,8 +388,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
             Buffer.from(eoaMessageEvent!.args.ciphertext.slice(2), "hex")
           );
           eoaCiphertextJson = new TextDecoder().decode(bytes);
-        } catch (err) {
-        }
+        } catch (err) {}
       }
 
       const saDecryptedMessage = decryptMessage(
@@ -382,7 +404,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
     it("should complete full handshake and bidirectional messaging flow", async () => {
       // 1. EOA initiates handshake with Smart Account
       const ephemeralKeys = nacl.box.keyPair();
-
       const initiateHandshakeTx = await initiateHandshake({
         executor: eoaAccount1Executor,
         recipientAddress: await smartAccount.getAddress(),
@@ -426,16 +447,14 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       expect(isValidHandshake).toBe(true);
 
       // 3. Smart Account responds to handshake
-      const inResponseTo = initiateReceipt.hash;
-
       const respondTx = await respondToHandshake({
         executor: smartAccountExecutor,
-        inResponseTo,
         initiatorPubKey: ephemeralKeys.publicKey,
         responderIdentityKeyPair: smartAccountIdentityKeys.keyPair,
         note: "Hello back from Smart Account!",
         identityProof: smartAccountIdentityKeys.identityProof,
         signer: smartAccountOwner,
+        initiatorIdentityPubKey: eoaAccount1IdentityKeys.keyPair.publicKey,
       });
 
       const respondReceipt = await respondTx.wait();
@@ -459,8 +478,15 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       const responseLog = {
         inResponseTo: responseEvent.args.inResponseTo,
         responder: responseEvent.args.responder,
+        responderEphemeralR: responseEvent.args.responderEphemeralR,
         ciphertext: responseEvent.args.ciphertext,
       };
+
+      const { topicOut: eoaToSaTopic, topicIn: saToEoaTopic } = deriveDuplex(
+        eoaAccount1IdentityKeys.keyPair.secretKey, // Alice (initiator)
+        smartAccountIdentityKeys.keyPair.publicKey, // Bob (responder)
+        responseEvent.args.inResponseTo as `0x${string}`
+      );
 
       const isValidResponse = await verifyHandshakeResponseIdentity(
         responseLog,
@@ -472,11 +498,10 @@ describe("End-to-End Handshake and Messaging Tests", () => {
 
       // 5. EOA sends message to Smart Account
       const message1 = "First message from EOA to Smart Account";
-      const topic = "eoa-to-sa-chat";
 
       const sendTx1 = await sendEncryptedMessage({
         executor: eoaAccount1Executor,
-        topic: keccak256(toUtf8Bytes(topic)),
+        topic: eoaToSaTopic, // Initiator→Responder
         message: message1,
         recipientPubKey: smartAccountIdentityKeys.keyPair.publicKey,
         senderAddress: (eoaAccount1.signer as Wallet).address,
@@ -499,7 +524,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
 
       const sendTx2 = await sendEncryptedMessage({
         executor: smartAccountExecutor,
-        topic: keccak256(toUtf8Bytes(topic)),
+        topic: saToEoaTopic, // Responder→Initiator
         message: message2,
         recipientPubKey: eoaAccount1IdentityKeys.keyPair.publicKey,
         senderAddress: await smartAccount.getAddress(),
@@ -554,8 +579,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
             Buffer.from(eoaMessageEvent!.args.ciphertext.slice(2), "hex")
           );
           eoaCiphertextJson = new TextDecoder().decode(bytes);
-        } catch (err) {
-        }
+        } catch (err) {}
       }
 
       const saDecryptedMessage = decryptMessage(
@@ -596,7 +620,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         deployerNM
       ).deploy(ENTRYPOINT_ADDR, (eoaAccount1.signer as Wallet).address);
       await secondSmartAccount.waitForDeployment();
-
       await deployerNM.sendTransaction({
         to: await secondSmartAccount.getAddress(),
         value: parseEther("1"),
@@ -665,16 +688,14 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       expect(isValidHandshake).toBe(true);
 
       // 3. Second Smart Account responds to handshake
-      const inResponseTo = initiateReceipt.hash;
-
       const respondTx = await respondToHandshake({
         executor: secondSmartAccountExecutor,
-        inResponseTo,
         initiatorPubKey: ephemeralKeys.publicKey,
         responderIdentityKeyPair: secondSmartAccountIdentityKeys.keyPair,
         note: "Hello back from second Smart Account!",
         identityProof: secondSmartAccountIdentityKeys.identityProof,
         signer: eoaAccount1.signer as Wallet,
+        initiatorIdentityPubKey: smartAccountIdentityKeys.keyPair.publicKey,
       });
 
       const respondReceipt = await respondTx.wait();
@@ -698,8 +719,15 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       const responseLog = {
         inResponseTo: responseEvent.args.inResponseTo,
         responder: responseEvent.args.responder,
+        responderEphemeralR: responseEvent.args.responderEphemeralR,
         ciphertext: responseEvent.args.ciphertext,
       };
+
+      const { topicOut: sa1ToSa2Topic, topicIn: sa2ToSa1Topic } = deriveDuplex(
+        smartAccountIdentityKeys.keyPair.secretKey,
+        secondSmartAccountIdentityKeys.keyPair.publicKey,
+        responseEvent.args.inResponseTo as `0x${string}`
+      );
 
       const isValidResponse = await verifyHandshakeResponseIdentity(
         responseLog,
@@ -711,11 +739,10 @@ describe("End-to-End Handshake and Messaging Tests", () => {
 
       // 5. First Smart Account sends message to Second Smart Account
       const message1 = "First message between Smart Accounts";
-      const topic = "sa-to-sa-chat";
 
       const sendTx1 = await sendEncryptedMessage({
         executor: smartAccountExecutor,
-        topic: keccak256(toUtf8Bytes(topic)),
+        topic: sa1ToSa2Topic, // Initiator→Responder
         message: message1,
         recipientPubKey: secondSmartAccountIdentityKeys.keyPair.publicKey,
         senderAddress: await smartAccount.getAddress(),
@@ -738,7 +765,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
 
       const sendTx2 = await sendEncryptedMessage({
         executor: secondSmartAccountExecutor,
-        topic: keccak256(toUtf8Bytes(topic)),
+        topic: sa2ToSa1Topic, // Responder→Initiator
         message: message2,
         recipientPubKey: smartAccountIdentityKeys.keyPair.publicKey,
         senderAddress: await secondSmartAccount.getAddress(),
@@ -794,8 +821,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
             Buffer.from(sa1MessageEvent!.args.ciphertext.slice(2), "hex")
           );
           sa1CiphertextJson = new TextDecoder().decode(bytes);
-        } catch (err) {
-        }
+        } catch (err) {}
       }
 
       const sa2DecryptedMessage = decryptMessage(
@@ -816,8 +842,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
             Buffer.from(sa2MessageEvent!.args.ciphertext.slice(2), "hex")
           );
           sa2CiphertextJson = new TextDecoder().decode(bytes);
-        } catch (err) {
-        }
+        } catch (err) {}
       }
 
       const sa1DecryptedMessage = decryptMessage(
@@ -833,7 +858,6 @@ describe("End-to-End Handshake and Messaging Tests", () => {
     it("should complete full handshake and bidirectional messaging flow", async () => {
       // 1. First EOA initiates handshake with Second EOA
       const ephemeralKeys = nacl.box.keyPair();
-
       const initiateHandshakeTx = await initiateHandshake({
         executor: eoaAccount1Executor,
         recipientAddress: (eoaAccount2.signer as Wallet).address,
@@ -877,16 +901,14 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       expect(isValidHandshake).toBe(true);
 
       // 3. Second EOA responds to handshake
-      const inResponseTo = initiateReceipt.hash;
-
       const respondTx = await respondToHandshake({
         executor: eoaAccount2Executor,
-        inResponseTo,
         initiatorPubKey: ephemeralKeys.publicKey,
         responderIdentityKeyPair: eoaAccount2IdentityKeys.keyPair,
         note: "Hello back from second EOA!",
         identityProof: eoaAccount2IdentityKeys.identityProof,
         signer: eoaAccount2.signer as Wallet,
+        initiatorIdentityPubKey: eoaAccount1IdentityKeys.keyPair.publicKey,
       });
 
       const respondReceipt = await respondTx.wait();
@@ -910,8 +932,16 @@ describe("End-to-End Handshake and Messaging Tests", () => {
       const responseLog = {
         inResponseTo: responseEvent.args.inResponseTo,
         responder: responseEvent.args.responder,
+        responderEphemeralR: responseEvent.args.responderEphemeralR,
         ciphertext: responseEvent.args.ciphertext,
       };
+
+      const { topicOut: eoa1ToEoa2Topic, topicIn: eoa2ToEoa1Topic } =
+        deriveDuplex(
+          eoaAccount1IdentityKeys.keyPair.secretKey,
+          eoaAccount2IdentityKeys.keyPair.publicKey,
+          responseEvent.args.inResponseTo as `0x${string}`
+        );
 
       const isValidResponse = await verifyHandshakeResponseIdentity(
         responseLog,
@@ -923,11 +953,10 @@ describe("End-to-End Handshake and Messaging Tests", () => {
 
       // 5. First EOA sends message to Second EOA
       const message1 = "First message between EOAs";
-      const topic = "eoa-to-eoa-chat";
 
       const sendTx1 = await sendEncryptedMessage({
         executor: eoaAccount1Executor,
-        topic: keccak256(toUtf8Bytes(topic)),
+        topic: eoa1ToEoa2Topic, // Initiator→Responder
         message: message1,
         recipientPubKey: eoaAccount2IdentityKeys.keyPair.publicKey,
         senderAddress: (eoaAccount1.signer as Wallet).address,
@@ -950,7 +979,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
 
       const sendTx2 = await sendEncryptedMessage({
         executor: eoaAccount2Executor,
-        topic: keccak256(toUtf8Bytes(topic)),
+        topic: eoa2ToEoa1Topic, // Responder→Initiator
         message: message2,
         recipientPubKey: eoaAccount1IdentityKeys.keyPair.publicKey,
         senderAddress: (eoaAccount2.signer as Wallet).address,
@@ -1004,8 +1033,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
             Buffer.from(eoa1MessageEvent!.args.ciphertext.slice(2), "hex")
           );
           eoa1CiphertextJson = new TextDecoder().decode(bytes);
-        } catch (err) {
-        }
+        } catch (err) {}
       }
 
       const eoa2DecryptedMessage = decryptMessage(
@@ -1026,8 +1054,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
             Buffer.from(eoa2MessageEvent!.args.ciphertext.slice(2), "hex")
           );
           eoa2CiphertextJson = new TextDecoder().decode(bytes);
-        } catch (err) {
-        }
+        } catch (err) {}
       }
 
       const eoa1DecryptedMessage = decryptMessage(

@@ -7,7 +7,7 @@
         <img src="https://img.shields.io/npm/v/@verbeth/sdk?style=flat-square">
     </a> -->
     <a href="LICENSE">
-        <img src="https://img.shields.io/github/license/okrame/verbeth-sdk?style=flat-square">
+        <img src="https://img.shields.io/badge/license-MPL--2.0-blue?style=flat-square">
     </a>
     <a href="https://github.com/okrame/verbeth-sdk/actions">
   <img src="https://img.shields.io/github/actions/workflow/status/okrame/verbeth-sdk/ci.yml?branch=main&style=flat-square">
@@ -26,7 +26,7 @@ E2EE messaging over Ethereum logs, using the blockchain as the only transport la
 
 ### Built With
 
-This SDK and the [demo app](https://verbeth-demo.vercel.app/) rely on battle-tested libraries:
+This SDK and [demo app](https://verbeth-demo.vercel.app/) rely on few battle-tested libraries:
 
 - [**TweetNaCl**](https://tweetnacl.js.org/) – Encryption/decryption (NaCl box)
 - [**Ethers v6**](https://docs.ethers.org/v6/) – Core Ethereum interactions, providers, contracts, signing
@@ -35,25 +35,38 @@ This SDK and the [demo app](https://verbeth-demo.vercel.app/) rely on battle-tes
 
 ---
 
-## How can Alice & Bob use it?
+## How can Alice & Bob use Verbeth?
 
-Alice wants to initiate a secure chat with Bob using only the blockchain.
+Alice wants to initiate a secure chat with Bob:
 
 1. Alice generates a new **ephemeral keypair**.
-2. She emits a `Handshake` event:
-   - Includes her ephemeral public key
-   - Includes her long-term unified keys (X25519 + Ed25519)
-   - Plaintext payload like: `"Hi Bob, respond if you're online"` with identity proof
-3. Bob watches logs for `Handshake` events addressed to him:
-   - Looks for `keccak256("contact:0xMyAddress")` in `recipientHash`
-   - Verifies Alice's identity using her identity proof
-4. If interested, Bob responds with a `HandshakeResponse`:
-   - Contains a payload encrypted to Alice's **ephemeral key** (not identity key)
-   - Includes his own ephemeral key, identity keys, and identity proof
-5. Once handshake is complete, both use Bob's identity key for future `MessageSent` logs:
-   - Alice encrypts messages using Bob's **identity key** + **fresh ephemeral keys per message**
-   - Alice signs messages using her **signing key**
-   - Bob and Alice filter messages using topics, timestamp, or sender
+2. She emits a `Handshake` event that includes:
+   - her ephemeral public key (for this handshake only)
+   - her long-term unified keys (X25519 + Ed25519)
+   - a plaintext payload carrying her identityProof and an optional note
+   - the recipientHash mapping to Bob
+3. Bob watches logs for handshake events addressed to him (matching his recipientHash), and:
+   - verifies Alice’s identity with the included identityProof,
+   - prepares his `HandshakeResponse`
+4. Bob computes a response tag and emits the response event:
+   - Bob generates an ephemeral keypair (R, r) dedicated to the tag.
+   - He computes the tag `H( HKDF( ECDH( r, Alice.viewPub ), "verbeth:hsr"))`
+   - He encrypts the response to Alice’s handshake ephemeral public key and includes:
+      - his ephemeral public key for post-handshake
+      - his identity keys (unified) + identityProof
+      - topicInfo (see below) inside the encrypted payload
+      - the public R and response tag in the log
+
+5. Using her view secret key and Bob’s public R, Alice recomputes the tag. She can then filter handshake response logs by this tag and decrypt the matching one.
+
+6. Once handshake is complete, both derive duplex topics and start emitting `MessageSent` events:
+  - Using a long-term diffie–hellman shared secret and the response tag as salt, they derive:
+      ```
+      shared  = ECDH( Alice , Bob )
+      topic = keccak256( HKDF(sha256, shared, salt, info) )
+      ```
+   - Alice encrypts messages using Bob’s identity key with a fresh ephemeral key per message (and vice versa).
+   - They can sign messages with their long term signing key
 
 ```
 ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
@@ -121,22 +134,17 @@ ALICE (Initiator)              BLOCKCHAIN               BOB (Responder)
       |                            |  Verify signature          |
       |                            |  Secure message delivered  |
       |----------------------------|----------------------------|
-      |  Key Security:                                          |
-      |   - Forward Secrecy (fresh ephemeral keys per message)  |
-      |   - Identity Verification                               |
-      |   - Address Binding                                     |
-      |   - Unified Key Management                              |
+      |                                                         |
+
 ```
 
 ## Contract
 
-/// We include `sender` (= msg.sender) as an indexed event field to bind each log to the
-/// actual caller account (EOA or smart account) and make it Bloom-filterable. A tx receipt/log
-/// does not expose the immediate caller of this contract—it only contains the emitter address
-/// (this contract) and the topics/data—so recovering `msg.sender` would require execution traces.
-/// Under ERC-4337 this is even harder: the outer tx targets EntryPoint and tx.from is the bundler,
-/// not the smart account. Without `sender` in the event, reliably linking a log to the originating
-/// account requires correlating EntryPoint internals or traces, which is non-standard and costly.
+ We include `sender` (= `msg.sender`) as an **indexed event field** to bind each log to the actual caller account (EOA or smart account) and make it "bloom-filterable".  
+
+A transaction receipt does not expose the immediate caller of this contract — it only contains the emitter address (this contract) and the topics/data — so recovering `msg.sender` would require execution traces.  
+
+Under ERC-4337 this becomes even trickier: the outer transaction targets the EntryPoint and tx.from is the bundler, not the smart account.  Without including sender in the event, reliably linking a log to the originating account would require correlating EntryPoint internals or traces.
 
 ### Deployed Addresses
 
@@ -165,9 +173,11 @@ It supports both EOAs and Smart Contract Accounts — whether they’re already 
 
 **Identity key binding**: The message (es. “VerbEth Key Binding v1\nAddress: …\nPkEd25519: …\nPkX25519: …\nContext: …\nVersion: …”) is signed by the evm account directly binding its address to the long-term keys (i.e. preventing impersonation).
 
-**Non-repudiation**: By default, confidentiality and integrity are guaranteed by AEAD with NaCl box. Additionally, the sender can attach a detached Ed25519 signature over (epk || nonce || ciphertext) using the Ed25519 key bound in the handshake. This effectively provides per-message origin authentication that is verifiable: a recipient (or any third party) can prove the message was produced by the holder of that specific Ed25519 key. Otherwise, attribution relies on context, making sender spoofing at the application layer harder to detect.
+**Non-repudiation**: By default, confidentiality and integrity are guaranteed by AEAD with NaCl box. Additionally, the sender can attach a detached Ed25519 signature over using the Ed25519 key bound in the handshake. This effectively provides per-message origin authentication that is verifiable: a recipient (or any third party) can prove the message was produced by the holder of that specific Ed25519 key. Otherwise, attribution relies on context, making sender spoofing at the application layer harder to detect.
 
 **Forward secrecy**: Each message uses a fresh sender ephemeral key. This provides sender-side forward secrecy for sent messages: once the sender deletes the ephemeral secret, a future compromise of their long-term keys does not expose past ciphertexts. Handshake responses also use ephemeral↔ephemeral, enjoying the same property. However, if a recipient’s long-term X25519 key is compromised, all past messages addressed to them remain decryptable. A double-ratchet (or ephemeral↔ephemeral messaging) can extend forward secrecy to the recipient side (see [here](#improvement-ideas)).
+
+**Messaging linkability**: Current version has duplex topics by default: one topic per direction, obtained with HKDF. So, each side writes on its own secret topic and we don’t get the “two accounts posting on the same topic, hence they’re chatting” giveaway. Also, the topic is optionally bound to each message by covering it in the detached Ed25519 signature `(topic || epk || nonce || ciphertext)`, which kills cross-topic replays. 
 
 ## Example Usage (WIP)
 

@@ -193,7 +193,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       signer: responderOwner,
       initiatorIdentityPubKey,
     });
-    const respondReceipt = await respondTx.wait();
+    const respondReceipt = await respondTx.tx.wait();
     expect(respondReceipt.status).toBe(1);
 
     const responseFilter = logChain.filters.HandshakeResponse();
@@ -280,7 +280,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
         initiatorIdentityPubKey,
       });
 
-      const respondReceipt = await respondTx.wait();
+      const respondReceipt = await respondTx.tx.wait();
       responseReceipts.push(respondReceipt);
     }
 
@@ -327,7 +327,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       signer: responderOwner,
     });
 
-    const respondReceipt = await respondTx.wait();
+    const respondReceipt = await respondTx.tx.wait();
     expect(respondReceipt.status).toBe(1);
 
     const responseFilter = logChain.filters.HandshakeResponse();
@@ -403,7 +403,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
         initiatorIdentityPubKey, 
       });
 
-      const respondReceipt = await respondTx.wait();
+      const respondReceipt = await respondTx.tx.wait();
       expect(respondReceipt.status).toBe(1);
     }
   }, 60000);
@@ -489,7 +489,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       signer: responderOwner,
     });
 
-    const respondReceipt = await respondTx.wait();
+    const respondReceipt = await respondTx.tx.wait();
     expect(respondReceipt.status).toBe(1);
 
     const responseFilter = logChain.filters.HandshakeResponse();
@@ -599,7 +599,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
       signer: responderOwner,
     });
 
-    const respondReceipt = await respondTx.wait();
+    const respondReceipt = await respondTx.tx.wait();
     expect(respondReceipt.status).toBe(1);
 
     const responseFilter = logChain.filters.HandshakeResponse();
@@ -688,7 +688,7 @@ describe("Smart Account Handshake Response via Direct EntryPoint", () => {
         signer: responderOwner,
       });
 
-      const respondReceipt = await respondTx.wait();
+      const respondReceipt = await respondTx.tx.wait();
 
       const responseFilter = logChain.filters.HandshakeResponse();
       const responseEvents = await logChain.queryFilter(

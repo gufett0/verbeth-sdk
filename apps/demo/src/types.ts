@@ -31,7 +31,8 @@ export interface Contact {
   identityPubKey?: Uint8Array; 
   signingPubKey?: Uint8Array; 
   ephemeralKey?: Uint8Array; 
-  topic?: string;
+  topicOutbound?: string; 
+  topicInbound?: string;
   status: 'none' | 'handshake_sent' | 'established';
   lastMessage?: string;
   lastTimestamp?: number;
@@ -136,15 +137,6 @@ export interface MessageProcessorResult {
   removePendingHandshake: (id: string) => void;
   updateContact: (contact: Contact) => void;
   processEvents: (events: ProcessedEvent[]) => Promise<void>;
-}
-
-
-export function generateConversationTopic(address1: string, address2: string): string {
-  if (!address1 || !address2) {
-    throw new Error('Both addresses are required for conversation topic generation');
-  }
-  const addresses = [address1.toLowerCase(), address2.toLowerCase()].sort();
-  return keccak256(toUtf8Bytes(`chat:${addresses[0]}:${addresses[1]}`));
 }
 
 export const generateTempMessageId = () => `temp-${Date.now()}-${Math.random()}`;

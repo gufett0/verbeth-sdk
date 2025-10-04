@@ -179,6 +179,16 @@ export async function respondToHandshake({
     ephemeralKeyPair.publicKey
   );
 
+  // Execute the transaction
+  const tx = await executor.respondToHandshake(
+    inResponseTo, 
+    hexlify(tagKeyPair.publicKey), 
+    toUtf8Bytes(payload)
+  );
   
-  return executor.respondToHandshake(inResponseTo, hexlify(tagKeyPair.publicKey), toUtf8Bytes(payload));
+  return {
+    tx,
+    salt,
+    tag: inResponseTo
+  };
 }

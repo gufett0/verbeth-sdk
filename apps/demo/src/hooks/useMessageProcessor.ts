@@ -9,7 +9,12 @@ import {
   IdentityKeyPair,
   decodeUnifiedPubKeys,
   verifyAndExtractHandshakeResponseKeys,
+  deriveDuplexTopics,
+  verifyDerivedDuplexTopics,
+  computeTagFromInitiator,
+  pickOutboundTopic
 } from "@verbeth/sdk";
+
 import { dbService } from "../services/DbService.js";
 import {
   Contact,
@@ -21,7 +26,6 @@ import {
   MessageType,
   ContactStatus,
   generateTempMessageId,
-  generateConversationTopic,
 } from "../types.js";
 
 interface UseMessageProcessorProps {
@@ -187,13 +191,9 @@ export const useMessageProcessor = ({
           return [...prev, pendingHandshake];
         });
 
-        const conversationTopic = generateConversationTopic(
-          address,
-          cleanSenderAddress
-        );
         const handshakeMessage: Message = {
           id: generateTempMessageId(),
-          topic: conversationTopic,
+          topic: "",
           sender: cleanSenderAddress,
           recipient: address,
           ciphertext: "",
@@ -275,7 +275,7 @@ export const useMessageProcessor = ({
         const responseEvent = {
           inResponseTo,
           responder,
-          responderEphemeralR: responderEphemeralRBytes, 
+          responderEphemeralR: responderEphemeralRBytes,
           ciphertext: ciphertextJson,
         };
 
@@ -298,6 +298,39 @@ export const useMessageProcessor = ({
         const { identityPubKey, signingPubKey, ephemeralPubKey, note } =
           result.keys;
 
+        if (!identityKeyPair) {
+          onLog(`❌ Cannot verify duplex topics: identityKeyPair is null`);
+          return;
+        }
+
+        const saltHex = computeTagFromInitiator(
+          contact.ephemeralKey, // Alice's ephemeral secret (stored when she sent handshake)
+          hexToUint8Array(responderEphemeralRBytes) // Bob's public R from the response event
+        );
+        const salt = Uint8Array.from(Buffer.from(saltHex.slice(2), "hex"));
+
+        const duplexTopics = deriveDuplexTopics(
+          identityKeyPair.secretKey, // Alice's identity secret key
+          identityPubKey, // Bob's identity public key (from response)
+          salt 
+        );
+        const isValidTopics = verifyDerivedDuplexTopics({
+          myIdentitySecretKey: identityKeyPair.secretKey,
+          theirIdentityPubKey: identityPubKey,
+          topicInfo: {
+            out: duplexTopics.topicOut,
+            in: duplexTopics.topicIn,
+            chk: duplexTopics.checksum,
+          },
+          salt
+        });
+        if (!isValidTopics) {
+          onLog(
+            `❌ Invalid duplex topics checksum for ${responder.slice(0, 8)}...`
+          );
+          return;
+        }
+
         onLog(
           `✅ Handshake response verified from ${responder.slice(0, 8)}...`
         );
@@ -308,7 +341,9 @@ export const useMessageProcessor = ({
           status: "established" as ContactStatus,
           identityPubKey,
           signingPubKey,
-          ephemeralKey: ephemeralPubKey, // Store responder's ephemeral key
+          ephemeralKey: undefined,//ephemeralPubKey, // Store responder's ephemeral key
+          topicOutbound: pickOutboundTopic(true, duplexTopics),   // Alice is initiator
+          topicInbound: pickOutboundTopic(false, duplexTopics),   // Bob is responder
           lastMessage: note || "Handshake accepted",
           lastTimestamp: Date.now(),
         };
@@ -331,10 +366,10 @@ export const useMessageProcessor = ({
         );
 
         // Add handshake response message to chat
-        const conversationTopic = generateConversationTopic(address, responder);
+        //const conversationTopic = generateConversationTopic(address, responder);
         const responseMessage: Message = {
           id: generateTempMessageId(),
-          topic: conversationTopic,
+          topic: updatedContact.topicInbound || "",
           sender: responder,
           recipient: address,
           ciphertext: "",
@@ -359,7 +394,7 @@ export const useMessageProcessor = ({
         console.error("Full error:", error);
       }
     },
-    [address, readProvider, onLog]
+    [address, readProvider, onLog, identityKeyPair]
   );
 
   // Process message log - load contacts from DB and update lastMessage
@@ -486,6 +521,19 @@ export const useMessageProcessor = ({
         if (!contact || !contact.identityPubKey || !contact.signingPubKey) {
           onLog(
             `❓ Received message from unknown contact: ${sender.slice(0, 8)}...`
+          );
+          return;
+        }
+
+        if (contact.topicInbound && topic !== contact.topicInbound) {
+          onLog(
+            `❌ Message topic mismatch from ${sender.slice(
+              0,
+              8
+            )}... - expected ${contact.topicInbound.slice(
+              0,
+              10
+            )}..., got ${topic.slice(0, 10)}...`
           );
           return;
         }

@@ -23,7 +23,6 @@ import {
   CONTRACT_CREATION_BLOCK,
   Contact,
   StoredIdentity,
-  generateConversationTopic,
 } from './types.js';
 import { InitialForm } from './components/InitialForm.js';
 import { SideToastNotifications } from './components/SideToastNotification.js';
@@ -693,11 +692,11 @@ export default function App() {
                             // without address o selectedContact, do not show messagges
                             const currentAddress = address || baseAddress;
                             if (!currentAddress || !selectedContact?.address) return false;
-                            const conversationTopic = generateConversationTopic(currentAddress, selectedContact.address);
                             return (
                               m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
                               (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||
-                              m.topic === conversationTopic
+                              (selectedContact.topicOutbound && m.topic === selectedContact.topicOutbound) ||
+                              (selectedContact.topicInbound && m.topic === selectedContact.topicInbound)
                             );
                           })
                           .sort((a, b) => a.timestamp - b.timestamp)
@@ -773,11 +772,11 @@ export default function App() {
                         {messages.filter(m => {
                           const currentAddress = address || baseAddress;
                           if (!currentAddress || !selectedContact?.address) return false;
-                          const conversationTopic = generateConversationTopic(currentAddress, selectedContact.address);
                           return (
                             m.sender.toLowerCase() === selectedContact.address.toLowerCase() ||
                             (m.direction === 'outgoing' && m.recipient?.toLowerCase() === selectedContact.address.toLowerCase()) ||
-                            m.topic === conversationTopic
+                            (selectedContact.topicOutbound && m.topic === selectedContact.topicOutbound) ||
+                            (selectedContact.topicInbound && m.topic === selectedContact.topicInbound)
                           );
                         }).length === 0 && (
                             <p className="text-gray-400 text-sm text-center py-8">

@@ -239,7 +239,7 @@ export const useMessageListener = ({
           `🔍 Found ${responseLogs.length} total handshake responses in blocks ${fromBlock}-${toBlock}`
         );
 
-        // Match by responder address 
+        // Match by responder address
         for (const log of responseLogs) {
           const responderAddress = "0x" + log.topics[2].slice(-40);
 
@@ -267,38 +267,39 @@ export const useMessageListener = ({
         (c) => c.status === "established"
       );
       if (establishedContacts.length > 0) {
-        const senderTopics = establishedContacts.map(
-          (c) =>
-            "0x" + c.address.replace("0x", "").toLowerCase().padStart(64, "0")
-        );
+        const inboundTopics = establishedContacts
+          .map((c) => c.topicInbound)
+          .filter(Boolean);
 
-        if (address) {
-          const myTopic =
-            "0x" + address.replace("0x", "").toLowerCase().padStart(64, "0");
-          if (!senderTopics.includes(myTopic)) senderTopics.push(myTopic);
-        }
+        const outboundTopics = establishedContacts
+          .map((c) => c.topicOutbound)
+          .filter(Boolean);
 
-        const messageFilter = {
-          address: LOGCHAIN_SINGLETON_ADDR,
-          topics: [EVENT_SIGNATURES.MessageSent, senderTopics],
-        };
-        const messageLogs = await safeGetLogs(
-          messageFilter,
-          fromBlock,
-          toBlock
-        );
+        const allTopics = [...new Set([...inboundTopics, ...outboundTopics])];
 
-        for (const log of messageLogs) {
-          const logKey = `${log.transactionHash}-${log.logIndex}`;
-          if (!processedLogs.current.has(logKey)) {
-            processedLogs.current.add(logKey);
-            allEvents.push({
-              logKey,
-              eventType: "message",
-              rawLog: log,
-              blockNumber: log.blockNumber,
-              timestamp: Date.now(),
-            });
+        if (allTopics.length > 0) {
+          const messageFilter = {
+            address: LOGCHAIN_SINGLETON_ADDR,
+            topics: [EVENT_SIGNATURES.MessageSent, null, allTopics],
+          };
+          const messageLogs = await safeGetLogs(
+            messageFilter,
+            fromBlock,
+            toBlock
+          );
+
+          for (const log of messageLogs) {
+            const logKey = `${log.transactionHash}-${log.logIndex}`;
+            if (!processedLogs.current.has(logKey)) {
+              processedLogs.current.add(logKey);
+              allEvents.push({
+                logKey,
+                eventType: "message",
+                rawLog: log,
+                blockNumber: log.blockNumber,
+                timestamp: Date.now(),
+              });
+            }
           }
         }
       }

@@ -335,15 +335,6 @@ async findPendingMessage(
       .toArray();
   }
 
-  getMessagesByTopic(topic: string, limit = 50) {
-    return this.db.messages
-      .where("topic")
-      .equals(topic)
-      .reverse()
-      .limit(limit)
-      .toArray();
-  }
-
   async getAllMessages(ownerAddress: string, limit = 100) {
     const normalizedOwner = this.normalizeAddress(ownerAddress);
     console.log(

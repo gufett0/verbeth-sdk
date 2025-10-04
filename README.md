@@ -177,7 +177,7 @@ It supports both EOAs and Smart Contract Accounts — whether they’re already 
 
 **Forward secrecy**: Each message uses a fresh sender ephemeral key. This provides sender-side forward secrecy for sent messages: once the sender deletes the ephemeral secret, a future compromise of their long-term keys does not expose past ciphertexts. Handshake responses also use ephemeral↔ephemeral, enjoying the same property. However, if a recipient’s long-term X25519 key is compromised, all past messages addressed to them remain decryptable. A double-ratchet (or ephemeral↔ephemeral messaging) can extend forward secrecy to the recipient side (see [here](#improvement-ideas)).
 
-**Messaging linkability**: Current version has duplex topics by default: one topic per direction, obtained with HKDF. So, each side writes on its own secret topic and we don’t get the “two accounts posting on the same topic, hence they’re chatting” giveaway. Also, the topic is optionally bound to each message by covering it in the detached Ed25519 signature `(topic || epk || nonce || ciphertext)`, which kills cross-topic replays. 
+**Messaging linkability**: Current version has duplex topics by default: one topic per direction, obtained with HKDF. So, each side writes on its own secret topic and we don’t get the “two accounts posting on the same topic, hence they’re chatting” giveaway. Also, the topic is optionally bound to each message by covering it in the detached Ed25519 signature `(topic || epk || nonce || ciphertext)`, which kills cross-topic replays. NB: The handshake phase and timing analysis can still reveal communication patterns.
 
 ## Example Usage (WIP)
 

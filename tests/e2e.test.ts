@@ -239,7 +239,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         initiatorIdentityPubKey: smartAccountIdentityKeys.keyPair.publicKey,
       });
 
-      const respondReceipt = await respondTx.wait();
+      const respondReceipt = await respondTx.tx.wait();
       expect(respondReceipt.status).toBe(1);
 
       while ((await provider.getBlockNumber()) < respondReceipt.blockNumber) {
@@ -457,7 +457,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         initiatorIdentityPubKey: eoaAccount1IdentityKeys.keyPair.publicKey,
       });
 
-      const respondReceipt = await respondTx.wait();
+      const respondReceipt = await respondTx.tx.wait();
       expect(respondReceipt.status).toBe(1);
 
       while ((await provider.getBlockNumber()) < respondReceipt.blockNumber) {
@@ -698,7 +698,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         initiatorIdentityPubKey: smartAccountIdentityKeys.keyPair.publicKey,
       });
 
-      const respondReceipt = await respondTx.wait();
+      const respondReceipt = await respondTx.tx.wait();
       expect(respondReceipt.status).toBe(1);
 
       while ((await provider.getBlockNumber()) < respondReceipt.blockNumber) {
@@ -911,7 +911,7 @@ describe("End-to-End Handshake and Messaging Tests", () => {
         initiatorIdentityPubKey: eoaAccount1IdentityKeys.keyPair.publicKey,
       });
 
-      const respondReceipt = await respondTx.wait();
+      const respondReceipt = await respondTx.tx.wait();
       expect(respondReceipt.status).toBe(1);
 
       while ((await provider.getBlockNumber()) < respondReceipt.blockNumber) {
